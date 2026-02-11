@@ -1,0 +1,28 @@
+{
+  "name": "discord-activity-starter",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A minimal starter project using embedded-app-sdk",
+  "main": "index.js",
+  "scripts": {
+    "install:all": "npm install && npm install --prefix packages/client && npm install --prefix packages/server",
+    "dev": "run-p dev:client dev:server",
+    "dev:client": "npm run dev --prefix packages/client",
+    "dev:server": "npm run dev --prefix packages/server",
+    "tunnel": "cloudflared tunnel --url http://localhost:3000"
+  },
+  "author": "Discord",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "nodemon": "^3.1.0",
+    "npm-run-all2": "^7.0.0",
+    "rimraf": "^6.0.0",
+    "ts-node": "^10.9.1",
+    "typescript": "~5.9.0"
+  }
+}
