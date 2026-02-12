@@ -6,6 +6,7 @@ const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID ?? import.meta.env.VITE_
 const discordSdk = new DiscordSDK(clientId ?? '');
 
 const WORD_LENGTH = 5;
+const WORD_LENGTH_6 = 6;
 const WORD_LENGTH_7 = 7;
 const MAX_GUESSES = 6;
 const MAX_WRONG_HANGMAN = 6;
@@ -15,10 +16,10 @@ const FLIP_DELAY_MS = 120;
 const CIRCLE_NAMES: Record<number, string> = {
 	1: 'Circle 1: Hangman',
 	2: 'Circle 2: Wordle',
-	3: 'Circle 3: Evil Wordle',
-	4: 'Circle 4: Eviler Wordle',
-	5: 'Circle 5: Evilest Wordle',
-	6: 'Circle 6: Wordle',
+	3: 'Circle 3: Unscramble',
+	4: 'Circle 4: Wordle',
+	5: 'Circle 5: Antagonistic Wordle',
+	6: 'Circle 6: 6-letter Wordle',
 	7: 'Circle 7: 7-letter Wordle',
 };
 
@@ -238,11 +239,117 @@ function renderHangman(
 	});
 }
 
-// ---- Wordle 5 (stages 2 & 3) ----
+// ---- Stage 3: Unscramble (Anagram) ----
+
+function renderAnagram(
+	app: HTMLDivElement,
+	onWin: (solvedWord?: string) => void,
+	onGameOver: () => void,
+	initialStage3?: Stage3Data | null,
+	onSaveStage3?: (data: Stage3Data) => void
+): void {
+	let letters = initialStage3?.letters ?? '';
+	let submitted = false;
+
+	function setMsg(text: string, isError = false): void {
+		const el = app.querySelector('.anagram-message');
+		if (el) {
+			el.textContent = text;
+			el.className = 'anagram-message' + (isError ? ' error' : '');
+		}
+	}
+
+	async function fetchLetters(): Promise<void> {
+		if (letters) return;
+		const res = await fetch('/api/anagram/letters');
+		const data = await res.json();
+		if (res.ok && data.letters) {
+			letters = data.letters;
+			onSaveStage3?.({ letters });
+			const disp = app.querySelector('.anagram-letters');
+			if (disp) disp.textContent = letters.split('').join(' ');
+		}
+	}
+
+	async function submitGuess(): Promise<void> {
+		const input = app.querySelector<HTMLInputElement>('.anagram-input');
+		const guess = input?.value?.trim() ?? '';
+		if (!guess || guess.length !== WORD_LENGTH || submitted) return;
+		submitted = true;
+		setMsg('');
+		const res = await fetch('/api/anagram/guess', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ guess: guess.toLowerCase() }),
+		});
+		const data = await res.json();
+		submitted = false;
+		if (!res.ok) {
+			setMsg(data.error ?? 'Invalid guess', true);
+			return;
+		}
+		if (data.won) {
+			onWin(guess.toLowerCase());
+		} else {
+			setMsg('Wrong word. Try again.', true);
+		}
+	}
+
+	const title = document.createElement('h1');
+	title.className = 'wordle-title';
+	title.textContent = CIRCLE_NAMES[3];
+
+	const lettersDiv = document.createElement('div');
+	lettersDiv.className = 'anagram-letters';
+	lettersDiv.textContent = letters ? letters.split('').join(' ') : '…';
+
+	const label = document.createElement('div');
+	label.className = 'anagram-label';
+	label.textContent = 'Unscramble the letters into a 5-letter word:';
+
+	const input = document.createElement('input');
+	input.type = 'text';
+	input.className = 'anagram-input';
+	input.placeholder = 'Type your guess';
+	input.maxLength = WORD_LENGTH;
+	input.autocomplete = 'off';
+
+	const msg = document.createElement('div');
+	msg.className = 'anagram-message';
+
+	const btn = document.createElement('button');
+	btn.type = 'button';
+	btn.className = 'reset-btn anagram-submit';
+	btn.textContent = 'Submit';
+	btn.addEventListener('click', () => submitGuess());
+
+	input.addEventListener('keydown', (e) => {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			submitGuess();
+		}
+	});
+
+	app.innerHTML = '';
+	app.appendChild(title);
+	app.appendChild(lettersDiv);
+	app.appendChild(label);
+	app.appendChild(input);
+	app.appendChild(msg);
+	app.appendChild(btn);
+
+	fetchLetters().then(() => {
+		if (letters && lettersDiv.textContent === '…') {
+			lettersDiv.textContent = letters.split('').join(' ');
+		}
+	});
+}
+
+// ---- Wordle 5 (stages 2, 4, 5) ----
 
 function renderWordle5(
 	app: HTMLDivElement,
-	stage: 2 | 3 | 4 | 5 | 6,
+	stage: 2 | 4 | 5,
 	onWin: (solvedWord?: string) => void,
 	onGameOver: () => void,
 	initialStage?: Stage2Or3Data | null,
@@ -395,7 +502,7 @@ function renderWordle5(
 				guess: currentGuess.toLowerCase(),
 				stage,
 			};
-			if (stage === 3) body.history = history;
+			if (stage === 5) body.history = history;
 			try {
 				const res = await fetch('/api/wordle/guess', {
 					method: 'POST',
@@ -518,7 +625,7 @@ function renderWordle5(
 					guess: previousStageSolvedWord.toLowerCase(),
 					stage,
 				};
-				if (stage === 3) body.history = history;
+				if (stage === 5) body.history = history;
 				const res = await fetch('/api/wordle/guess', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
@@ -574,6 +681,236 @@ function renderWordle5(
 		})();
 	}
 
+	updateGrid();
+}
+
+// ---- Wordle 6 (Circle 6) ----
+
+function renderWordle6(
+	app: HTMLDivElement,
+	onWin: (solvedWord?: string) => void,
+	onGameOver: () => void,
+	initialStage6?: Stage2Or3Data | null,
+	onSaveStage6?: (data: Stage2Or3Data) => void
+): void {
+	const toCellState = (r: WordleRowState[]): CellState[] =>
+		r.map((c) => ({ letter: c.letter, feedback: c.feedback as CellState['feedback'] }));
+	let completedRows: CellState[][] = initialStage6?.completedRows?.length
+		? initialStage6.completedRows.map((row) => toCellState(row))
+		: [];
+	let currentGuess = initialStage6?.currentGuess ?? '';
+	let gameOver = false;
+
+	const cell6 = () => {
+		const c = document.createElement('div');
+		c.className = 'wordle-cell';
+		const inner = document.createElement('div');
+		inner.className = 'wordle-cell-inner';
+		const front = document.createElement('div');
+		front.className = 'wordle-cell-front';
+		const back = document.createElement('div');
+		back.className = 'wordle-cell-back';
+		inner.appendChild(front);
+		inner.appendChild(back);
+		c.appendChild(inner);
+		return c;
+	};
+
+	const grid = document.createElement('div');
+	grid.className = 'wordle-grid wordle-grid-6';
+	for (let i = 0; i < MAX_GUESSES; i++) {
+		const r = document.createElement('div');
+		r.className = 'wordle-row';
+		for (let j = 0; j < WORD_LENGTH_6; j++) r.appendChild(cell6());
+		grid.appendChild(r);
+	}
+
+	function animateRevealRow6(rowIndex: number): void {
+		const rowEl = grid.querySelectorAll('.wordle-row')[rowIndex];
+		if (!rowEl) return;
+		const cells = rowEl.querySelectorAll('.wordle-cell');
+		cells.forEach((cellEl, i) => {
+			setTimeout(() => {
+				const inner = cellEl.querySelector('.wordle-cell-inner');
+				if (inner) inner.classList.add('flip');
+			}, i * FLIP_DELAY_MS);
+		});
+	}
+
+	function setMessage6(text: string, isError = false): void {
+		const msgEl = app.querySelector('.wordle-message');
+		if (msgEl) {
+			msgEl.textContent = text;
+			msgEl.className = 'wordle-message' + (isError ? ' error' : '');
+		}
+	}
+
+	const message = document.createElement('div');
+	message.className = 'wordle-message';
+
+	const keys = [
+		'Q W E R T Y U I O P'.split(' '),
+		'A S D F G H J K L'.split(' '),
+		['Enter', ...'Z X C V B N M'.split(' '), 'Backspace'],
+	];
+	const keyboard = document.createElement('div');
+	keyboard.className = 'wordle-keyboard';
+	keys.forEach((keyRow) => {
+		const rowEl = document.createElement('div');
+		rowEl.className = 'keyboard-row';
+		keyRow.forEach((key) => {
+			const btn = document.createElement('button');
+			btn.type = 'button';
+			btn.className = 'keyboard-key';
+			if (key === 'Enter') btn.className += ' key-enter';
+			if (key === 'Backspace') btn.className += ' key-backspace';
+			btn.textContent = key === 'Backspace' ? '⌫' : key;
+			btn.addEventListener('click', () => handleKey(key));
+			rowEl.appendChild(btn);
+		});
+		keyboard.appendChild(rowEl);
+	});
+
+	function updateGrid(animatingRowIndex: number = -1): void {
+		const rows = grid.querySelectorAll('.wordle-row');
+		rows.forEach((rowEl, rowIndex) => {
+			const cells = rowEl.querySelectorAll('.wordle-cell');
+			if (rowIndex < completedRows.length) {
+				completedRows[rowIndex].forEach((s, colIndex) => {
+					const cellEl = cells[colIndex];
+					const inner = cellEl.querySelector('.wordle-cell-inner');
+					const front = cellEl.querySelector('.wordle-cell-front');
+					const back = cellEl.querySelector('.wordle-cell-back');
+					if (inner && front && back) {
+						front.textContent = s.letter;
+						back.textContent = s.letter;
+						back.className = 'wordle-cell-back';
+						if (s.feedback !== null) {
+							back.classList.add(
+								s.feedback === FEEDBACK.correct ? 'correct' :
+								s.feedback === FEEDBACK.present ? 'present' : 'absent'
+							);
+						}
+						inner.classList.remove('flip');
+						if (rowIndex !== animatingRowIndex) inner.classList.add('flip');
+					}
+				});
+			} else if (rowIndex === completedRows.length) {
+				for (let i = 0; i < WORD_LENGTH_6; i++) {
+					const cellEl = cells[i];
+					const letter = currentGuess[i] ?? '';
+					const front = cellEl.querySelector('.wordle-cell-front');
+					const back = cellEl.querySelector('.wordle-cell-back');
+					if (front) front.textContent = letter;
+					if (back) { back.textContent = letter; back.className = 'wordle-cell-back'; }
+					cellEl.className = 'wordle-cell' + (letter ? ' filled' : '');
+				}
+			} else {
+				cells.forEach((c) => {
+					const front = c.querySelector('.wordle-cell-front');
+					const back = c.querySelector('.wordle-cell-back');
+					if (front) front.textContent = '';
+					if (back) { back.textContent = ''; back.className = 'wordle-cell-back'; }
+					c.className = 'wordle-cell';
+				});
+			}
+		});
+	}
+
+	const keyFeedback: Record<string, number> = {};
+	function updateKeyboardState(): void {
+		completedRows.flat().forEach(({ letter, feedback }) => {
+			const k = letter.toUpperCase();
+			if (feedback != null && (keyFeedback[k] == null || feedback > keyFeedback[k])) keyFeedback[k] = feedback;
+		});
+		keyboard.querySelectorAll('.keyboard-key').forEach((btn) => {
+			const letter = (btn as HTMLElement).textContent?.trim();
+			if (letter && letter.length === 1) {
+				btn.className = 'keyboard-key';
+				if (keyFeedback[letter] === FEEDBACK.correct) btn.classList.add('correct');
+				else if (keyFeedback[letter] === FEEDBACK.present) btn.classList.add('present');
+				else if (keyFeedback[letter] === FEEDBACK.absent) btn.classList.add('absent');
+			}
+		});
+	}
+
+	let submittingGuess = false;
+	async function handleKey(key: string): Promise<void> {
+		if (gameOver) return;
+		if (key === 'Enter') {
+			if (submittingGuess || currentGuess.length !== WORD_LENGTH_6) {
+				if (currentGuess.length !== WORD_LENGTH_6) setMessage6('Not enough letters', true);
+				return;
+			}
+			submittingGuess = true;
+			setMessage6('');
+			try {
+				const res = await fetch('/api/wordle/guess', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ guess: currentGuess.toLowerCase(), stage: 6 }),
+				});
+				const data = await res.json();
+				if (!res.ok) {
+					setMessage6(data.error ?? 'Invalid guess', true);
+					return;
+				}
+				const rowState: CellState[] = currentGuess.split('').map((letter, i) => ({
+					letter: letter.toUpperCase(),
+					feedback: data.feedback[i],
+				}));
+				completedRows.push(rowState);
+				const solvedWord = currentGuess.toLowerCase();
+				currentGuess = '';
+				onSaveStage6?.({
+					completedRows: completedRows.map((r) => r.map((c) => ({ letter: c.letter, feedback: c.feedback }))),
+					history: [],
+					currentGuess: '',
+				});
+				if (data.won) onWin(solvedWord);
+				else if (completedRows.length >= MAX_GUESSES) onGameOver();
+				else {
+					const revealedRowIndex = completedRows.length - 1;
+					updateGrid(revealedRowIndex);
+					animateRevealRow6(revealedRowIndex);
+				}
+				updateKeyboardState();
+			} finally {
+				submittingGuess = false;
+			}
+			return;
+		}
+		if (key === 'Backspace') {
+			currentGuess = currentGuess.slice(0, -1);
+			updateGrid();
+			setMessage6('');
+			onSaveStage6?.({ completedRows: completedRows.map((r) => r.map((c) => ({ letter: c.letter, feedback: c.feedback }))), history: [], currentGuess: currentGuess.slice(0, -1) });
+			return;
+		}
+		if (key.length === 1 && /^[A-Za-z]$/.test(key) && currentGuess.length < WORD_LENGTH_6) {
+			currentGuess += key.toUpperCase();
+			updateGrid();
+			setMessage6('');
+			onSaveStage6?.({ completedRows: completedRows.map((r) => r.map((c) => ({ letter: c.letter, feedback: c.feedback }))), history: [], currentGuess: currentGuess });
+		}
+	}
+
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Enter' || e.key === 'Backspace') { e.preventDefault(); handleKey(e.key); }
+		else if (e.key.length === 1 && /^[A-Za-z]$/.test(e.key)) { e.preventDefault(); handleKey(e.key.toUpperCase()); }
+	});
+
+	const title = document.createElement('h1');
+	title.className = 'wordle-title';
+	title.textContent = CIRCLE_NAMES[6];
+
+	app.innerHTML = '';
+	app.appendChild(title);
+	app.appendChild(grid);
+	app.appendChild(message);
+	app.appendChild(keyboard);
+
+	if (completedRows.length > 0) updateKeyboardState();
 	updateGrid();
 }
 
@@ -809,23 +1146,20 @@ function renderWordle7(
 		updateKeyboardState();
 	}
 	
-	// Pre-fill first row: previous stage's solved word (5 letters) + 2 blank cells
-	// Treat the prefilled word like it was guessed: submit it to get feedback
-	if (completedRows.length === 0 && previousStageSolvedWord && previousStageSolvedWord.length === WORD_LENGTH) {
+	// Pre-fill first row: previous stage's 6-letter word + 1 blank cell
+	if (completedRows.length === 0 && previousStageSolvedWord && previousStageSolvedWord.length === WORD_LENGTH_6) {
 		(async () => {
 			const word = previousStageSolvedWord.toUpperCase();
 			try {
 				const res = await fetch('/api/wordle/stage7-prefill', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ word5: previousStageSolvedWord.toLowerCase() }),
+					body: JSON.stringify({ word6: previousStageSolvedWord.toLowerCase() }),
 				});
 				const data = await res.json();
 				if (!res.ok) {
-					// Fallback: show letters with no feedback
 					const firstRow: CellState[] = [
 						...word.split('').map((l) => ({ letter: l, feedback: null })),
-						{ letter: '', feedback: null },
 						{ letter: '', feedback: null },
 					];
 					completedRows = [firstRow];
@@ -839,7 +1173,6 @@ function renderWordle7(
 				const rowState: CellState[] = [
 					...word.split('').map((letter, i) => ({ letter, feedback: data.feedback[i] })),
 					{ letter: '', feedback: null },
-					{ letter: '', feedback: null },
 				];
 				completedRows = [rowState];
 				onSaveStage7?.({
@@ -852,7 +1185,6 @@ function renderWordle7(
 				const firstRow: CellState[] = [
 					...word.split('').map((l) => ({ letter: l, feedback: null })),
 					{ letter: '', feedback: null },
-					{ letter: '', feedback: null },
 				];
 				completedRows = [firstRow];
 				onSaveStage7?.({
@@ -863,13 +1195,14 @@ function renderWordle7(
 			}
 		})();
 	}
-	
+
 	updateGrid();
 }
 
 // ---- Main game flow ----
 
 type Stage1Data = { revealed: (string | null)[]; wrongGuesses: string[]; currentWordGuess: string };
+type Stage3Data = { letters?: string };
 type WordleRowState = { letter: string; feedback: number | null };
 type Stage2Or3Data = { completedRows: WordleRowState[][]; history: { guess: string; feedback: number[] }[]; currentGuess: string };
 type Stage7Data = { completedRows: WordleRowState[][]; currentGuess: string };
@@ -880,7 +1213,7 @@ type Progress = {
 	victory: boolean;
 	stage1?: Stage1Data;
 	stage2?: Stage2Or3Data;
-	stage3?: Stage2Or3Data;
+	stage3?: Stage3Data;
 	stage4?: Stage2Or3Data;
 	stage5?: Stage2Or3Data;
 	stage6?: Stage2Or3Data;
@@ -925,8 +1258,8 @@ function computeDailyScore(progress: Progress): number {
 	if (progress.stage2?.completedRows?.length) {
 		score += progress.stage2.completedRows.length * WORD_LENGTH;
 	}
-	if (progress.stage3?.completedRows?.length) {
-		score += progress.stage3.completedRows.length * WORD_LENGTH;
+	if (progress.solvedWord3?.length === WORD_LENGTH) {
+		score += WORD_LENGTH;
 	}
 	if (progress.stage4?.completedRows?.length) {
 		score += progress.stage4.completedRows.length * WORD_LENGTH;
@@ -935,7 +1268,7 @@ function computeDailyScore(progress: Progress): number {
 		score += progress.stage5.completedRows.length * WORD_LENGTH;
 	}
 	if (progress.stage6?.completedRows?.length) {
-		score += progress.stage6.completedRows.length * WORD_LENGTH;
+		score += progress.stage6.completedRows.length * WORD_LENGTH_6;
 	}
 	if (progress.stage7?.completedRows?.length) {
 		score += progress.stage7.completedRows.length * WORD_LENGTH_7;
@@ -1013,7 +1346,7 @@ function renderGame(app: HTMLDivElement, initial: Progress | null = null): void 
 		} else if (currentStage === 5 && solvedWord?.length === WORD_LENGTH) {
 			progressState.solvedWord5 = solvedWord;
 			mergeSave({ solvedWord5: solvedWord, stage: next });
-		} else if (currentStage === 6 && solvedWord?.length === WORD_LENGTH) {
+		} else if (currentStage === 6 && solvedWord?.length === WORD_LENGTH_6) {
 			progressState.solvedWord6 = solvedWord;
 			mergeSave({ solvedWord6: solvedWord, stage: next });
 		} else {
@@ -1081,10 +1414,10 @@ function renderGame(app: HTMLDivElement, initial: Progress | null = null): void 
 		if (progressState.victory) return renderVictory(app, canReset ? onReset : null);
 		if (progressState.stage === 1) return renderHangman(app, goToNextStage, doGameOver, progressState.stage1, (d) => mergeSave({ stage1: d }));
 		if (progressState.stage === 2) return renderWordle5(app, 2, goToNextStage, doGameOver, progressState.stage2, progressState.solvedWord1, (d) => mergeSave({ stage2: d }));
-		if (progressState.stage === 3) return renderWordle5(app, 3, goToNextStage, doGameOver, progressState.stage3, progressState.solvedWord2, (d) => mergeSave({ stage3: d }));
+		if (progressState.stage === 3) return renderAnagram(app, goToNextStage, doGameOver, progressState.stage3, (d) => mergeSave({ stage3: d }));
 		if (progressState.stage === 4) return renderWordle5(app, 4, goToNextStage, doGameOver, progressState.stage4, progressState.solvedWord3, (d) => mergeSave({ stage4: d }));
 		if (progressState.stage === 5) return renderWordle5(app, 5, goToNextStage, doGameOver, progressState.stage5, progressState.solvedWord4, (d) => mergeSave({ stage5: d }));
-		if (progressState.stage === 6) return renderWordle5(app, 6, goToNextStage, doGameOver, progressState.stage6, progressState.solvedWord5, (d) => mergeSave({ stage6: d }));
+		if (progressState.stage === 6) return renderWordle6(app, goToNextStage, doGameOver, progressState.stage6, (d) => mergeSave({ stage6: d }));
 		if (progressState.stage === 7) return renderWordle7(app, doVictory, doGameOver, progressState.stage7, progressState.solvedWord6, (d) => mergeSave({ stage7: d }));
 	}
 

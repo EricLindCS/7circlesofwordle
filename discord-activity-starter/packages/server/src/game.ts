@@ -2,29 +2,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const WORD_LENGTH = 5;
+const WORD_LENGTH_6 = 6;
 const WORD_LENGTH_7 = 7;
 const MAX_WRONG_HANGMAN = 6;
 const MAX_GUESSES_WORDLE = 6;
 
+/** Use first N words of main list as "easy" for Hangman (stage 1). */
+const EASY_WORD_LIST_SIZE = 1500;
+
 let wordList: string[] = [];
+let easyWordList: string[] = [];
+let wordList6: string[] = [];
 let wordList7: string[] = [];
 
-function getTodaySeed(): number {
-	const today = new Date();
-	const dateStr = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
-	let hash = 0;
-	for (let i = 0; i < dateStr.length; i++) {
-		hash = (hash << 5) - hash + dateStr.charCodeAt(i);
-		hash |= 0;
-	}
-	return Math.abs(hash);
-}
-
 function seedForStage(stage: number): number {
-	// Create a deterministic seed per (date, stage) by hashing the date string
-	// combined with the stage number. This avoids collisions caused by the
-	// prior iterative transform and guarantees different stages map to
-	// different seeds (modulo word list length).
 	const today = new Date();
 	const dateStr = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
 	const key = `${dateStr}:${stage}`;
@@ -43,11 +34,21 @@ export function loadWordList(): void {
 		.split('\n')
 		.map((w) => w.trim().toLowerCase())
 		.filter((w) => w.length === WORD_LENGTH);
+	easyWordList = wordList.slice(0, Math.min(EASY_WORD_LIST_SIZE, wordList.length));
+}
+
+function loadWordList6(): void {
+	if (wordList6.length > 0) return;
+	const filePath = path.join(__dirname, '..', '..', '..', 'sorted_scrabble.txt');
+	const content = fs.readFileSync(filePath, 'utf-8');
+	wordList6 = content
+		.split('\n')
+		.map((w) => w.trim().toLowerCase())
+		.filter((w) => w.length === WORD_LENGTH_6);
 }
 
 function loadWordList7(): void {
 	if (wordList7.length > 0) return;
-	// From dist: ../../../ = discord-activity-starter
 	const filePath = path.join(__dirname, '..', '..', '..', 'sorted_scrabble.txt');
 	const content = fs.readFileSync(filePath, 'utf-8');
 	wordList7 = content
@@ -56,28 +57,27 @@ function loadWordList7(): void {
 		.filter((w) => w.length === WORD_LENGTH_7);
 }
 
-/** Today's 5-letter word for stage 1 (Hangman). One random word per day, same for all users. */
+/** Stage 1: Hangman uses easier word list (first 1500 words). */
 export function getTodayWord(): string {
 	if (wordList.length === 0) loadWordList();
-	const index = seedForStage(1) % wordList.length;
-	return wordList[index];
+	const index = seedForStage(1) % easyWordList.length;
+	return easyWordList[index];
 }
 
-/** Set of words already used by other stages (to pick a distinct word for a stage). Stage 3 is adversarial so has no single word. */
-function getUsedWordsForStages(excludeStages: number[]): Set<string> {
+/** Set of 5-letter words already used by other stages (for distinct picks). */
+function getUsed5LetterWords(excludeStages: number[]): Set<string> {
 	const used = new Set<string>();
 	if (excludeStages.includes(1)) used.add(getTodayWord());
 	if (excludeStages.includes(2)) used.add(getTodayWordStage2());
+	if (excludeStages.includes(3)) used.add(getTodayWordStage3());
 	if (excludeStages.includes(4)) used.add(getTodayWordStage4());
-	if (excludeStages.includes(5)) used.add(getTodayWordStage5());
-	if (excludeStages.includes(6)) used.add(getTodayWordStage6());
 	return used;
 }
 
-/** Today's 5-letter word for stage 2 (Wordle). Different from stage 1, rolled daily. */
+/** Stage 2: Regular 5-letter Wordle. */
 export function getTodayWordStage2(): string {
 	if (wordList.length === 0) loadWordList();
-	const used = getUsedWordsForStages([1]);
+	const used = getUsed5LetterWords([1]);
 	const index = seedForStage(2) % wordList.length;
 	let candidate = wordList[index];
 	let attempts = 0;
@@ -90,10 +90,56 @@ export function getTodayWordStage2(): string {
 	return candidate;
 }
 
-/** Today's 5-letter word for stage 4 (Circle 4). */
+/** Stage 3: Anagram (unscramble) – one 5-letter word per day. */
+export function getTodayWordStage3(): string {
+	if (wordList.length === 0) loadWordList();
+	const used = getUsed5LetterWords([1, 2]);
+	const index = seedForStage(3) % wordList.length;
+	let candidate = wordList[index];
+	let attempts = 0;
+	let currentIndex = index;
+	while (used.has(candidate) && attempts < wordList.length) {
+		currentIndex = (currentIndex + 1) % wordList.length;
+		candidate = wordList[currentIndex];
+		attempts++;
+	}
+	return candidate;
+}
+
+/** Deterministic shuffle for anagram letters (same for all users per day). */
+function shuffleWord(word: string): string {
+	const seed = seedForStage(3);
+	const arr = word.split('');
+	for (let i = arr.length - 1; i > 0; i--) {
+		const j = (seed + i * 31) % (i + 1);
+		[arr[i], arr[j]] = [arr[j], arr[i]];
+	}
+	return arr.join('').toUpperCase();
+}
+
+export function getAnagramLettersStage3(): string {
+	const word = getTodayWordStage3();
+	return shuffleWord(word);
+}
+
+export function validateAnagramStage3(guess: string): { won: boolean } | { error: string } {
+	if (wordList.length === 0) loadWordList();
+	const g = guess.trim().toLowerCase();
+	if (g.length !== WORD_LENGTH) return { error: 'Guess must be 5 letters' };
+	if (!wordList.includes(g)) return { error: 'Not in word list' };
+	const secret = getTodayWordStage3();
+	const won = sortLetters(g) === sortLetters(secret);
+	return { won };
+}
+
+function sortLetters(w: string): string {
+	return w.split('').sort().join('');
+}
+
+/** Stage 4: Another 5-letter Wordle. */
 export function getTodayWordStage4(): string {
 	if (wordList.length === 0) loadWordList();
-	const used = getUsedWordsForStages([1, 2, 3]);
+	const used = getUsed5LetterWords([1, 2, 3]);
 	const index = seedForStage(4) % wordList.length;
 	let candidate = wordList[index];
 	let attempts = 0;
@@ -106,39 +152,19 @@ export function getTodayWordStage4(): string {
 	return candidate;
 }
 
-/** Today's 5-letter word for stage 5 (Circle 5). */
-export function getTodayWordStage5(): string {
-	if (wordList.length === 0) loadWordList();
-	const used = getUsedWordsForStages([1, 2, 3, 4]);
-	const index = seedForStage(5) % wordList.length;
-	let candidate = wordList[index];
-	let attempts = 0;
-	let currentIndex = index;
-	while (used.has(candidate) && attempts < wordList.length) {
-		currentIndex = (currentIndex + 1) % wordList.length;
-		candidate = wordList[currentIndex];
-		attempts++;
-	}
-	return candidate;
+/** Stage 5: Antagonistic Wordle – no single word; adversary picks. */
+function getUsed5LetterForAdversary(): Set<string> {
+	return getUsed5LetterWords([1, 2, 3, 4]);
 }
 
-/** Today's 5-letter word for stage 6 (Circle 6). */
+/** Stage 6: 6-letter Wordle. */
 export function getTodayWordStage6(): string {
-	if (wordList.length === 0) loadWordList();
-	const used = getUsedWordsForStages([1, 2, 3, 4, 5]);
-	const index = seedForStage(6) % wordList.length;
-	let candidate = wordList[index];
-	let attempts = 0;
-	let currentIndex = index;
-	while (used.has(candidate) && attempts < wordList.length) {
-		currentIndex = (currentIndex + 1) % wordList.length;
-		candidate = wordList[currentIndex];
-		attempts++;
-	}
-	return candidate;
+	loadWordList6();
+	const index = seedForStage(6) % wordList6.length;
+	return wordList6[index];
 }
 
-/** Today's 7-letter word for stage 7 (final circle). */
+/** Stage 7: 7-letter Wordle. */
 export function getTodayWord7(): string {
 	loadWordList7();
 	const index = seedForStage(7) % wordList7.length;
@@ -195,28 +221,28 @@ export function getFeedback(secret: string, guess: string): number[] {
 	return getFeedbackFor(secret, guess, WORD_LENGTH);
 }
 
+function getFeedback6(secret: string, guess: string): number[] {
+	return getFeedbackFor(secret, guess, WORD_LENGTH_6);
+}
+
 function getFeedback7(secret: string, guess: string): number[] {
 	return getFeedbackFor(secret, guess, WORD_LENGTH_7);
 }
 
-/** Get feedback for a 5-letter word against the first 5 letters of a 7-letter word.
- *  Considers the full 7-letter word for letter counts (yellow feedback). */
-export function getFeedbackForFirst5Letters(secret7: string, guess5: string): number[] {
-	const result: number[] = new Array(5).fill(0);
+/** Feedback for first 6 letters of 7-letter secret (for stage 7 prefill from stage 6). */
+export function getFeedbackForFirst6Letters(secret7: string, guess6: string): number[] {
+	const result: number[] = new Array(6).fill(0);
 	const secretCount: Record<string, number> = {};
-	// Count all letters in the 7-letter word
 	for (const c of secret7) secretCount[c] = (secretCount[c] ?? 0) + 1;
-	// First pass: mark correct positions (green) in first 5 letters
-	for (let i = 0; i < 5; i++) {
-		if (guess5[i] === secret7[i]) {
+	for (let i = 0; i < 6; i++) {
+		if (guess6[i] === secret7[i]) {
 			result[i] = 2;
 			secretCount[secret7[i]]--;
 		}
 	}
-	// Second pass: mark present letters (yellow) considering full 7-letter word
-	for (let i = 0; i < 5; i++) {
+	for (let i = 0; i < 6; i++) {
 		if (result[i] === 2) continue;
-		const c = guess5[i];
+		const c = guess6[i];
 		if (secretCount[c] != null && secretCount[c] > 0) {
 			result[i] = 1;
 			secretCount[c]--;
@@ -225,7 +251,7 @@ export function getFeedbackForFirst5Letters(secret7: string, guess5: string): nu
 	return result;
 }
 
-// ---- Stage 2: Wordle (own daily word) ----
+// ---- Stage 2: Regular Wordle 5 ----
 
 export function validateGuessStage2(guess: string): { feedback: number[]; won: boolean } | { error: string } {
 	if (wordList.length === 0) loadWordList();
@@ -237,11 +263,22 @@ export function validateGuessStage2(guess: string): { feedback: number[]; won: b
 	return { feedback, won: feedback.every((v) => v === 2) };
 }
 
-// ---- Stage 3: Antagonistic Wordle ----
+// ---- Stage 4: Wordle 5 (another word) ----
 
-/** Words in wordList that are consistent with every (guess, feedback) in history. */
+export function validateGuessStage4(guess: string): { feedback: number[]; won: boolean } | { error: string } {
+	if (wordList.length === 0) loadWordList();
+	const g = guess.trim().toLowerCase();
+	if (g.length !== WORD_LENGTH) return { error: 'Guess must be 5 letters' };
+	if (!wordList.includes(g)) return { error: 'Not in word list' };
+	const secret = getTodayWordStage4();
+	const feedback = getFeedback(secret, g);
+	return { feedback, won: feedback.every((v) => v === 2) };
+}
+
+// ---- Stage 5: Antagonistic Wordle 5 ----
+
 function wordsConsistentWith(history: { guess: string; feedback: number[] }[]): string[] {
-	const used = getUsedWordsForStages([1, 2, 4, 5, 6]);
+	const used = getUsed5LetterForAdversary();
 	return wordList.filter((secret) => {
 		if (used.has(secret)) return false;
 		return history.every(({ guess, feedback }) => {
@@ -251,8 +288,7 @@ function wordsConsistentWith(history: { guess: string; feedback: number[] }[]): 
 	});
 }
 
-/** Adversarial: given history and new guess, return feedback that maximizes the size of the remaining consistent set. */
-export function validateGuessStage3(
+export function validateGuessStage5(
 	guess: string,
 	history: { guess: string; feedback: number[] }[]
 ): { feedback: number[]; won: boolean } | { error: string } {
@@ -264,7 +300,6 @@ export function validateGuessStage3(
 	const consistent = wordsConsistentWith(history);
 	if (consistent.length === 0) return { error: 'No consistent word' };
 
-	// Group consistent words by the feedback they would produce for this guess
 	const feedbackToWords: Record<string, string[]> = {};
 	for (const secret of consistent) {
 		const feedback = getFeedback(secret, g);
@@ -273,7 +308,6 @@ export function validateGuessStage3(
 		feedbackToWords[key].push(secret);
 	}
 
-	// Adversary picks the feedback that leaves the largest set (hardest for player)
 	let bestKey: string | null = null;
 	let bestSize = 0;
 	for (const [key, words] of Object.entries(feedbackToWords)) {
@@ -287,39 +321,19 @@ export function validateGuessStage3(
 	return { feedback, won };
 }
 
-// ---- Stages 4, 5, 6: 5-letter Wordle (each circle has its own word) ----
-
-export function validateGuessStage4(guess: string): { feedback: number[]; won: boolean } | { error: string } {
-	if (wordList.length === 0) loadWordList();
-	const g = guess.trim().toLowerCase();
-	if (g.length !== WORD_LENGTH) return { error: 'Guess must be 5 letters' };
-	if (!wordList.includes(g)) return { error: 'Not in word list' };
-	const secret = getTodayWordStage4();
-	const feedback = getFeedback(secret, g);
-	return { feedback, won: feedback.every((v) => v === 2) };
-}
-
-export function validateGuessStage5(guess: string): { feedback: number[]; won: boolean } | { error: string } {
-	if (wordList.length === 0) loadWordList();
-	const g = guess.trim().toLowerCase();
-	if (g.length !== WORD_LENGTH) return { error: 'Guess must be 5 letters' };
-	if (!wordList.includes(g)) return { error: 'Not in word list' };
-	const secret = getTodayWordStage5();
-	const feedback = getFeedback(secret, g);
-	return { feedback, won: feedback.every((v) => v === 2) };
-}
+// ---- Stage 6: 6-letter Wordle ----
 
 export function validateGuessStage6(guess: string): { feedback: number[]; won: boolean } | { error: string } {
-	if (wordList.length === 0) loadWordList();
+	loadWordList6();
 	const g = guess.trim().toLowerCase();
-	if (g.length !== WORD_LENGTH) return { error: 'Guess must be 5 letters' };
-	if (!wordList.includes(g)) return { error: 'Not in word list' };
+	if (g.length !== WORD_LENGTH_6) return { error: 'Guess must be 6 letters' };
+	if (!wordList6.includes(g)) return { error: 'Not in word list' };
 	const secret = getTodayWordStage6();
-	const feedback = getFeedback(secret, g);
+	const feedback = getFeedback6(secret, g);
 	return { feedback, won: feedback.every((v) => v === 2) };
 }
 
-// ---- Stage 7: 7-letter Wordle (final circle) ----
+// ---- Stage 7: 7-letter Wordle ----
 
 export function validateGuessStage7(guess: string): { feedback: number[]; won: boolean } | { error: string } {
 	loadWordList7();
@@ -334,6 +348,11 @@ export function validateGuessStage7(guess: string): { feedback: number[]; won: b
 export function isWordValid5(word: string): boolean {
 	if (wordList.length === 0) loadWordList();
 	return wordList.includes(word.toLowerCase());
+}
+
+export function isWordValid6(word: string): boolean {
+	loadWordList6();
+	return wordList6.includes(word.toLowerCase());
 }
 
 export function isWordValid7(word: string): boolean {

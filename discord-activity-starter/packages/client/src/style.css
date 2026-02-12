@@ -391,6 +391,50 @@ button {
 	margin-bottom: 1rem;
 }
 
+/* Stage 3: Unscramble (Anagram) */
+.anagram-letters {
+	font-size: 2rem;
+	letter-spacing: 0.4em;
+	font-weight: 700;
+	margin: 1rem 0 0.5rem;
+	text-transform: uppercase;
+}
+
+.anagram-label {
+	font-size: 0.9rem;
+	color: var(--wordle-text-muted);
+	margin: 0.5rem 0 0.25rem;
+}
+
+.anagram-input {
+	display: block;
+	margin: 0.5rem auto 0.25rem;
+	padding: 0.5rem 0.75rem;
+	font-size: 1.1rem;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	max-width: 12rem;
+	text-align: center;
+	border: 2px solid var(--wordle-border);
+	border-radius: 4px;
+	background: var(--wordle-cell-bg);
+	color: var(--wordle-text);
+}
+
+.anagram-message {
+	min-height: 1.5rem;
+	font-size: 0.9rem;
+	margin: 0.25rem 0 0.5rem;
+}
+
+.anagram-message.error {
+	color: #c53030;
+}
+
+.anagram-submit {
+	margin-top: 0.5rem;
+}
+
 /* Game over / Victory */
 .screen {
 	display: flex;
@@ -434,6 +478,13 @@ button {
 
 .reset-btn:hover {
 	background: #404249;
+}
+
+/* 6-letter Wordle grid */
+.wordle-grid-6 .wordle-cell {
+	width: 2.2rem;
+	height: 2.2rem;
+	font-size: 1.1rem;
 }
 
 /* 7-letter Wordle grid: smaller cells */

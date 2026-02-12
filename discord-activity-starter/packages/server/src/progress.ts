@@ -6,6 +6,11 @@ export type Stage1Data = {
 };
 
 export type WordleRowState = { letter: string; feedback: number | null };
+/** Stage 3 = Anagram (unscramble). Optional letters so client can restore without refetch. */
+export type Stage3Data = {
+	letters?: string;
+};
+
 export type Stage2Or3Data = {
 	completedRows: WordleRowState[][];
 	history: { guess: string; feedback: number[] }[];
@@ -29,7 +34,7 @@ export type ProgressRecord = {
 	victory: boolean;
 	stage1?: Stage1Data;
 	stage2?: Stage2Or3Data;
-	stage3?: Stage2Or3Data;
+	stage3?: Stage3Data;
 	stage4?: Stage2Or3Data;
 	stage5?: Stage2Or3Data;
 	stage6?: Stage2Or3Data;

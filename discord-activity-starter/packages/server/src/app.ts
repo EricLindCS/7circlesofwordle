@@ -13,13 +13,14 @@ import {
 	getTodayWord7,
 	hangmanGuessLetter,
 	hangmanGuessWord,
+	getAnagramLettersStage3,
+	validateAnagramStage3,
 	validateGuessStage2,
-	validateGuessStage3,
 	validateGuessStage4,
 	validateGuessStage5,
 	validateGuessStage6,
 	validateGuessStage7,
-	getFeedbackForFirst5Letters,
+	getFeedbackForFirst6Letters,
 } from './game';
 import { getProgress, setProgress, resetProgress } from './progress';
 
@@ -130,7 +131,7 @@ app.post('/api/progress', async (req: Request, res: Response) => {
 	};
 	if (stage1 != null && Array.isArray(stage1.revealed)) patch.stage1 = stage1;
 	if (stage2 != null && Array.isArray(stage2.completedRows)) patch.stage2 = stage2;
-	if (stage3 != null && Array.isArray(stage3.completedRows)) patch.stage3 = stage3;
+	if (stage3 != null && typeof stage3 === 'object') patch.stage3 = stage3;
 	if (stage4 != null && Array.isArray(stage4.completedRows)) patch.stage4 = stage4;
 	if (stage5 != null && Array.isArray(stage5.completedRows)) patch.stage5 = stage5;
 	if (stage6 != null && Array.isArray(stage6.completedRows)) patch.stage6 = stage6;
@@ -183,10 +184,10 @@ app.post('/api/report-score', async (req: Request, res: Response) => {
 	const stageNames: Record<number, string> = {
 		1: 'Circle 1 (Hangman)',
 		2: 'Circle 2 (Wordle)',
-		3: 'Circle 3 (Evil Wordle)',
-		4: 'Circle 4 (Eviler Wordle)',
-		5: 'Circle 5 (Evilest Wordle)',
-		6: 'Circle 6 (Wordle)',
+		3: 'Circle 3 (Unscramble)',
+		4: 'Circle 4 (Wordle)',
+		5: 'Circle 5 (Antagonistic Wordle)',
+		6: 'Circle 6 (6-letter Wordle)',
 		7: 'Circle 7 (7-letter Wordle)',
 	};
 	const stageName = stageNames[Number(stageReached)] ?? `Circle ${stageReached}`;
@@ -245,21 +246,27 @@ app.post('/api/hangman/guess', (req: Request, res: Response) => {
 	res.json(result);
 });
 
-// Wordle stages 2–7
+// Stage 3: Anagram (unscramble)
+app.get('/api/anagram/letters', (_req: Request, res: Response) => {
+	res.json({ letters: getAnagramLettersStage3() });
+});
+
+app.post('/api/anagram/guess', (req: Request, res: Response) => {
+	const { guess } = req.body ?? {};
+	const result = validateAnagramStage3(String(guess ?? ''));
+	if ('error' in result) {
+		res.status(400).json({ error: result.error });
+		return;
+	}
+	res.json(result);
+});
+
+// Wordle stages 2, 4, 5 (5-letter), 6 (6-letter), 7 (7-letter). Stage 3 is anagram.
 app.post('/api/wordle/guess', (req: Request, res: Response) => {
 	const { guess, stage, history } = req.body ?? {};
 	const g = guess ?? '';
 	if (stage === 2) {
 		const result = validateGuessStage2(g);
-		if ('error' in result) {
-			res.status(400).json({ error: result.error });
-			return;
-		}
-		res.json(result);
-		return;
-	}
-	if (stage === 3) {
-		const result = validateGuessStage3(g, Array.isArray(history) ? history : []);
 		if ('error' in result) {
 			res.status(400).json({ error: result.error });
 			return;
@@ -277,7 +284,7 @@ app.post('/api/wordle/guess', (req: Request, res: Response) => {
 		return;
 	}
 	if (stage === 5) {
-		const result = validateGuessStage5(g);
+		const result = validateGuessStage5(g, Array.isArray(history) ? history : []);
 		if ('error' in result) {
 			res.status(400).json({ error: result.error });
 			return;
@@ -303,19 +310,19 @@ app.post('/api/wordle/guess', (req: Request, res: Response) => {
 		res.json(result);
 		return;
 	}
-	res.status(400).json({ error: 'Missing or invalid stage (2–7)' });
+	res.status(400).json({ error: 'Missing or invalid stage (2, 4, 5, 6, or 7)' });
 });
 
-// Get feedback for a 5-letter word against the first 5 letters of stage 7's 7-letter solution
+// Stage 7 prefill: feedback for first 6 letters (from stage 6's 6-letter word)
 app.post('/api/wordle/stage7-prefill', (req: Request, res: Response) => {
-	const { word5 } = req.body ?? {};
-	const w = String(word5 ?? '').trim().toLowerCase();
-	if (w.length !== 5) {
-		res.status(400).json({ error: 'Word must be 5 letters' });
+	const { word6 } = req.body ?? {};
+	const w = String(word6 ?? '').trim().toLowerCase();
+	if (w.length !== 6) {
+		res.status(400).json({ error: 'Word must be 6 letters' });
 		return;
 	}
 	const secret7 = getTodayWord7();
-	const feedback = getFeedbackForFirst5Letters(secret7, w);
+	const feedback = getFeedbackForFirst6Letters(secret7, w);
 	res.json({ feedback });
 });
 
