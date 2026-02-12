@@ -10,6 +10,10 @@ import { fetchAndRetry } from './utils';
 import {
 	loadWordList,
 	getTodayWord,
+	getTodayWordStage2,
+	getTodayWordStage3,
+	getTodayWordStage4,
+	getTodayWordStage6,
 	getTodayWord7,
 	hangmanGuessLetter,
 	hangmanGuessWord,
@@ -266,6 +270,15 @@ app.post('/api/wordle/guess', (req: Request, res: Response) => {
 	const { guess, stage, history } = req.body ?? {};
 	const g = guess ?? '';
 	if (stage === 2) {
+		// Debug: log guess vs secret in non-production to help track incorrect wins
+		if (process.env.NODE_ENV !== 'production') {
+			try {
+				const secretDbg = getTodayWordStage2();
+				console.log(`[debug] /api/wordle/guess stage=2 — guess=${g} secret=${secretDbg}`);
+			} catch (e) {
+				console.log('[debug] /api/wordle/guess stage=2 — failed to read secret', e);
+			}
+		}
 		const result = validateGuessStage2(g);
 		if ('error' in result) {
 			res.status(400).json({ error: result.error });
@@ -325,6 +338,25 @@ app.post('/api/wordle/stage7-prefill', (req: Request, res: Response) => {
 	const feedback = getFeedbackForFirst6Letters(secret7, w);
 	res.json({ feedback });
 });
+
+// Debug endpoint: return today's secrets for each stage (only in non-production)
+if (process.env.NODE_ENV !== 'production') {
+	app.get('/api/debug/today-words', (_req: Request, res: Response) => {
+		try {
+			res.json({
+				date: new Date().toISOString().slice(0, 10),
+				stage1: getTodayWord(),
+				stage2: getTodayWordStage2(),
+				stage3: getTodayWordStage3(),
+				stage4: getTodayWordStage4(),
+				stage6: getTodayWordStage6(),
+				stage7: getTodayWord7(),
+			});
+		} catch (e) {
+			res.status(500).json({ error: (e as Error).message ?? String(e) });
+		}
+	});
+}
 
 // Fetch token from developer portal and return to the embedded app
 app.post('/api/token', async (req: Request, res: Response) => {

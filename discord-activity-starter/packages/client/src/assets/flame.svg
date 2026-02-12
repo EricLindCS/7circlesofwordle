@@ -1,0 +1,15 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M16 4C12 8 8 14 8 20C8 25 11 28 16 28C21 28 24 25 24 20C24 14 20 8 16 4Z" fill="url(#flame)"/>
+  <path d="M16 10C14 12 12 16 12 20C12 23 13.5 25 16 25C18.5 25 20 23 20 20C20 16 18 12 16 10Z" fill="url(#flameInner)"/>
+  <defs>
+    <linearGradient id="flame" x1="16" y1="4" x2="16" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff6b35"/>
+      <stop offset="0.5" stop-color="#c94a1a"/>
+      <stop offset="1" stop-color="#8b2a2a"/>
+    </linearGradient>
+    <linearGradient id="flameInner" x1="16" y1="10" x2="16" y2="25" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffaa44"/>
+      <stop offset="1" stop-color="#c97d1a"/>
+    </linearGradient>
+  </defs>
+</svg>

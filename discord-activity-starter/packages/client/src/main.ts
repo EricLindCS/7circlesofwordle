@@ -87,7 +87,8 @@ function renderHangman(
 	onWin: (solvedWord?: string) => void,
 	onGameOver: () => void,
 	initialStage1?: Stage1Data | null,
-	onSaveStage1?: (data: Stage1Data) => void
+	onSaveStage1?: (data: Stage1Data) => void,
+	signal?: AbortSignal
 ): void {
 	const revealed: (string | null)[] = initialStage1?.revealed?.length === WORD_LENGTH
 		? [...initialStage1.revealed]
@@ -236,7 +237,7 @@ function renderHangman(
 			}
 			guessLetter(e.key.toUpperCase());
 		}
-	});
+	}, { signal });
 }
 
 // ---- Stage 3: Unscramble (Anagram) ----
@@ -246,7 +247,8 @@ function renderAnagram(
 	onWin: (solvedWord?: string) => void,
 	onGameOver: () => void,
 	initialStage3?: Stage3Data | null,
-	onSaveStage3?: (data: Stage3Data) => void
+	onSaveStage3?: (data: Stage3Data) => void,
+	_signal?: AbortSignal
 ): void {
 	let letters = initialStage3?.letters ?? '';
 	let submitted = false;
@@ -275,6 +277,7 @@ function renderAnagram(
 		const input = app.querySelector<HTMLInputElement>('.anagram-input');
 		const guess = input?.value?.trim() ?? '';
 		if (!guess || guess.length !== WORD_LENGTH || submitted) return;
+		// Only one guess allowed for the anagram stage
 		submitted = true;
 		setMsg('');
 		const res = await fetch('/api/anagram/guess', {
@@ -283,7 +286,6 @@ function renderAnagram(
 			body: JSON.stringify({ guess: guess.toLowerCase() }),
 		});
 		const data = await res.json();
-		submitted = false;
 		if (!res.ok) {
 			setMsg(data.error ?? 'Invalid guess', true);
 			return;
@@ -291,7 +293,9 @@ function renderAnagram(
 		if (data.won) {
 			onWin(guess.toLowerCase());
 		} else {
-			setMsg('Wrong word. Try again.', true);
+			// Wrong guess: player gets only one attempt for this stage — game over
+			setMsg('Wrong word. Game over.', true);
+			onGameOver();
 		}
 	}
 
@@ -354,7 +358,8 @@ function renderWordle5(
 	onGameOver: () => void,
 	initialStage?: Stage2Or3Data | null,
 	previousStageSolvedWord?: string,
-	onSaveStage?: (data: Stage2Or3Data) => void
+	onSaveStage?: (data: Stage2Or3Data) => void,
+	signal?: AbortSignal
 ): void {
 	const toCellState = (r: WordleRowState[]): CellState[] =>
 		r.map((c) => ({ letter: c.letter, feedback: c.feedback as CellState['feedback'] }));
@@ -509,6 +514,8 @@ function renderWordle5(
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify(body),
 				});
+				// If this render was aborted (reset/stage change), discard result
+				if (signal?.aborted) return;
 				const data = await res.json();
 				if (!res.ok) {
 					setMessage(data.error ?? 'Invalid guess', true);
@@ -521,6 +528,9 @@ function renderWordle5(
 				completedRows.push(rowState);
 				history.push({ guess: currentGuess.toLowerCase(), feedback: data.feedback });
 				const solvedWord = currentGuess.toLowerCase();
+				const isAllCorrect = Array.isArray(data.feedback)
+					&& data.feedback.length === WORD_LENGTH
+					&& data.feedback.every((v: number) => v === FEEDBACK.correct);
 				const nextGuess = '';
 				currentGuess = nextGuess;
 				onSaveStage?.({
@@ -528,7 +538,7 @@ function renderWordle5(
 					history: [...history],
 					currentGuess: nextGuess,
 				});
-				if (data.won) {
+				if (Boolean(data.won) && isAllCorrect) {
 					onWin(solvedWord);
 				} else if (completedRows.length >= MAX_GUESSES) onGameOver();
 				const revealedRowIndex = completedRows.length - 1;
@@ -575,7 +585,7 @@ function renderWordle5(
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Enter' || e.key === 'Backspace') { e.preventDefault(); handleKey(e.key); }
 		else if (e.key.length === 1 && /^[A-Za-z]$/.test(e.key)) { e.preventDefault(); handleKey(e.key.toUpperCase()); }
-	});
+	}, { signal });
 
 	const title = document.createElement('h1');
 	title.className = 'wordle-title';
@@ -588,11 +598,12 @@ function renderWordle5(
 	app.appendChild(keyboard);
 
 	// Check if we need to submit the carried-over word from previous stage
+	const shouldAutoSubmitPrefill = stage === 2;
 	// This should happen if:
 	// 1. No completed rows yet, OR
 	// 2. First row exists but doesn't match the previous stage's word, OR
 	// 3. First row exists but has null/invalid feedback
-	const needsSubmission = previousStageSolvedWord && previousStageSolvedWord.length === WORD_LENGTH && (() => {
+	const needsSubmission = shouldAutoSubmitPrefill && previousStageSolvedWord && previousStageSolvedWord.length === WORD_LENGTH && (() => {
 		if (completedRows.length === 0) return true; // No rows yet, need to submit
 		const firstRow = completedRows[0];
 		if (firstRow.length !== WORD_LENGTH) return true; // First row has wrong length
@@ -617,7 +628,7 @@ function renderWordle5(
 	// Pre-fill first row: previous stage's solved word (5 letters) if provided.
 	// Treat the prefilled word like it was guessed: submit it to the server
 	// so we get feedback, update history, keyboard state, and trigger win/game-over if applicable.
-	if (needsSubmission) {
+	if (needsSubmission && previousStageSolvedWord) {
 		(async () => {
 			const word = previousStageSolvedWord.toUpperCase();
 			try {
@@ -625,12 +636,14 @@ function renderWordle5(
 					guess: previousStageSolvedWord.toLowerCase(),
 					stage,
 				};
-				if (stage === 5) body.history = history;
+				if (stage === 5 as number) body.history = history;
 				const res = await fetch('/api/wordle/guess', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify(body),
 				});
+				// If the render was aborted (e.g. user reset), stop processing
+				if (signal?.aborted) return;
 				const data = await res.json();
 				if (!res.ok) {
 					// Fallback: show letters with no feedback and persist minimal state
@@ -662,7 +675,10 @@ function renderWordle5(
 				onSaveStage?.({ completedRows: completedRows.map((r) => r.map((c) => ({ letter: c.letter, feedback: c.feedback }))), history: [...history], currentGuess: '' });
 				updateGrid();
 				updateKeyboardState();
-				if (data.won) {
+				const isAllCorrect = Array.isArray(data.feedback)
+					&& data.feedback.length === WORD_LENGTH
+					&& data.feedback.every((v: number) => v === FEEDBACK.correct);
+				if (Boolean(data.won) && isAllCorrect) {
 					onWin(previousStageSolvedWord.toLowerCase());
 				} else if (completedRows.length >= MAX_GUESSES) {
 					onGameOver();
@@ -691,7 +707,8 @@ function renderWordle6(
 	onWin: (solvedWord?: string) => void,
 	onGameOver: () => void,
 	initialStage6?: Stage2Or3Data | null,
-	onSaveStage6?: (data: Stage2Or3Data) => void
+	onSaveStage6?: (data: Stage2Or3Data) => void,
+	signal?: AbortSignal
 ): void {
 	const toCellState = (r: WordleRowState[]): CellState[] =>
 		r.map((c) => ({ letter: c.letter, feedback: c.feedback as CellState['feedback'] }));
@@ -898,7 +915,7 @@ function renderWordle6(
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Enter' || e.key === 'Backspace') { e.preventDefault(); handleKey(e.key); }
 		else if (e.key.length === 1 && /^[A-Za-z]$/.test(e.key)) { e.preventDefault(); handleKey(e.key.toUpperCase()); }
-	});
+	}, { signal });
 
 	const title = document.createElement('h1');
 	title.className = 'wordle-title';
@@ -922,7 +939,8 @@ function renderWordle7(
 	onGameOver: () => void,
 	initialStage7?: Stage7Data | null,
 	previousStageSolvedWord?: string,
-	onSaveStage7?: (data: Stage7Data) => void
+	onSaveStage7?: (data: Stage7Data) => void,
+	signal?: AbortSignal
 ): void {
 	const toCellState = (r: WordleRowState[]): CellState[] =>
 		r.map((c) => ({ letter: c.letter, feedback: c.feedback as CellState['feedback'] }));
@@ -1129,7 +1147,7 @@ function renderWordle7(
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Enter' || e.key === 'Backspace') { e.preventDefault(); handleKey(e.key); }
 		else if (e.key.length === 1 && /^[A-Za-z]$/.test(e.key)) { e.preventDefault(); handleKey(e.key.toUpperCase()); }
-	});
+	}, { signal });
 
 	const title = document.createElement('h1');
 	title.className = 'wordle-title';
@@ -1405,20 +1423,49 @@ function renderGame(app: HTMLDivElement, initial: Progress | null = null): void 
 		reRender();
 	}
 
+	// AbortController to clean up keydown listeners from previous renders.
+	// Each reRender aborts the previous controller, removing stale listeners.
+	let renderAbort: AbortController | null = null;
+
 	function reRender(): void {
+		// Abort any previous render's keydown listeners
+		if (renderAbort) renderAbort.abort();
+		renderAbort = new AbortController();
+		const renderSignal = renderAbort.signal;
+
 		const circle = String(progressState.stage);
 		app.setAttribute('data-circle', circle);
 		document.body.setAttribute('data-circle', circle);
 		app.innerHTML = '';
+		// Render flame icons based on the current stage (1..7)
+		const flames = document.createElement('div');
+		flames.className = 'flames';
+		const count = Math.max(1, Math.min(7, progressState.stage));
+		for (let i = 0; i < count; i++) {
+			const img = document.createElement('img');
+			img.src = '/src/assets/flame.svg';
+			img.alt = 'flame';
+			flames.appendChild(img);
+		}
+		app.appendChild(flames);
+
+		// Always-visible reset button for testing
+		const resetBtn = document.createElement('button');
+		resetBtn.type = 'button';
+		resetBtn.className = 'debug-reset-btn';
+		resetBtn.textContent = '⟳ Reset';
+		resetBtn.addEventListener('click', () => onReset());
+		app.appendChild(resetBtn);
+
 		if (progressState.gameOver) return renderGameOver(app, canReset ? onReset : null);
 		if (progressState.victory) return renderVictory(app, canReset ? onReset : null);
-		if (progressState.stage === 1) return renderHangman(app, goToNextStage, doGameOver, progressState.stage1, (d) => mergeSave({ stage1: d }));
-		if (progressState.stage === 2) return renderWordle5(app, 2, goToNextStage, doGameOver, progressState.stage2, progressState.solvedWord1, (d) => mergeSave({ stage2: d }));
-		if (progressState.stage === 3) return renderAnagram(app, goToNextStage, doGameOver, progressState.stage3, (d) => mergeSave({ stage3: d }));
-		if (progressState.stage === 4) return renderWordle5(app, 4, goToNextStage, doGameOver, progressState.stage4, progressState.solvedWord3, (d) => mergeSave({ stage4: d }));
-		if (progressState.stage === 5) return renderWordle5(app, 5, goToNextStage, doGameOver, progressState.stage5, progressState.solvedWord4, (d) => mergeSave({ stage5: d }));
-		if (progressState.stage === 6) return renderWordle6(app, goToNextStage, doGameOver, progressState.stage6, (d) => mergeSave({ stage6: d }));
-		if (progressState.stage === 7) return renderWordle7(app, doVictory, doGameOver, progressState.stage7, progressState.solvedWord6, (d) => mergeSave({ stage7: d }));
+		if (progressState.stage === 1) return renderHangman(app, goToNextStage, doGameOver, progressState.stage1, (d) => mergeSave({ stage1: d }), renderSignal);
+		if (progressState.stage === 2) return renderWordle5(app, 2, goToNextStage, doGameOver, progressState.stage2, progressState.solvedWord1, (d) => mergeSave({ stage2: d }), renderSignal);
+		if (progressState.stage === 3) return renderAnagram(app, goToNextStage, doGameOver, progressState.stage3, (d) => mergeSave({ stage3: d }), renderSignal);
+		if (progressState.stage === 4) return renderWordle5(app, 4, goToNextStage, doGameOver, progressState.stage4, progressState.solvedWord3, (d) => mergeSave({ stage4: d }), renderSignal);
+		if (progressState.stage === 5) return renderWordle5(app, 5, goToNextStage, doGameOver, progressState.stage5, progressState.solvedWord4, (d) => mergeSave({ stage5: d }), renderSignal);
+		if (progressState.stage === 6) return renderWordle6(app, goToNextStage, doGameOver, progressState.stage6, (d) => mergeSave({ stage6: d }), renderSignal);
+		if (progressState.stage === 7) return renderWordle7(app, doVictory, doGameOver, progressState.stage7, progressState.solvedWord6, (d) => mergeSave({ stage7: d }), renderSignal);
 	}
 
 	reRender();
