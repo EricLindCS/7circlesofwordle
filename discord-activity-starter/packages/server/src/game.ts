@@ -63,18 +63,26 @@ export function getTodayWord(): string {
 	return wordList[index];
 }
 
+/** Set of words already used by other stages (to pick a distinct word for a stage). Stage 3 is adversarial so has no single word. */
+function getUsedWordsForStages(excludeStages: number[]): Set<string> {
+	const used = new Set<string>();
+	if (excludeStages.includes(1)) used.add(getTodayWord());
+	if (excludeStages.includes(2)) used.add(getTodayWordStage2());
+	if (excludeStages.includes(4)) used.add(getTodayWordStage4());
+	if (excludeStages.includes(5)) used.add(getTodayWordStage5());
+	if (excludeStages.includes(6)) used.add(getTodayWordStage6());
+	return used;
+}
+
 /** Today's 5-letter word for stage 2 (Wordle). Different from stage 1, rolled daily. */
 export function getTodayWordStage2(): string {
 	if (wordList.length === 0) loadWordList();
-	const stage1Word = getTodayWord();
+	const used = getUsedWordsForStages([1]);
 	const index = seedForStage(2) % wordList.length;
-	
-	// Ensure stage 2 word is not the same as stage 1 (hangman).
-	// Try words starting from the seeded index until we find one that's different
 	let candidate = wordList[index];
 	let attempts = 0;
 	let currentIndex = index;
-	while (candidate === stage1Word && attempts < wordList.length) {
+	while (used.has(candidate) && attempts < wordList.length) {
 		currentIndex = (currentIndex + 1) % wordList.length;
 		candidate = wordList[currentIndex];
 		attempts++;
@@ -82,10 +90,58 @@ export function getTodayWordStage2(): string {
 	return candidate;
 }
 
-/** Today's 7-letter word for stage 4. Random from list, rolled daily. */
+/** Today's 5-letter word for stage 4 (Circle 4). */
+export function getTodayWordStage4(): string {
+	if (wordList.length === 0) loadWordList();
+	const used = getUsedWordsForStages([1, 2, 3]);
+	const index = seedForStage(4) % wordList.length;
+	let candidate = wordList[index];
+	let attempts = 0;
+	let currentIndex = index;
+	while (used.has(candidate) && attempts < wordList.length) {
+		currentIndex = (currentIndex + 1) % wordList.length;
+		candidate = wordList[currentIndex];
+		attempts++;
+	}
+	return candidate;
+}
+
+/** Today's 5-letter word for stage 5 (Circle 5). */
+export function getTodayWordStage5(): string {
+	if (wordList.length === 0) loadWordList();
+	const used = getUsedWordsForStages([1, 2, 3, 4]);
+	const index = seedForStage(5) % wordList.length;
+	let candidate = wordList[index];
+	let attempts = 0;
+	let currentIndex = index;
+	while (used.has(candidate) && attempts < wordList.length) {
+		currentIndex = (currentIndex + 1) % wordList.length;
+		candidate = wordList[currentIndex];
+		attempts++;
+	}
+	return candidate;
+}
+
+/** Today's 5-letter word for stage 6 (Circle 6). */
+export function getTodayWordStage6(): string {
+	if (wordList.length === 0) loadWordList();
+	const used = getUsedWordsForStages([1, 2, 3, 4, 5]);
+	const index = seedForStage(6) % wordList.length;
+	let candidate = wordList[index];
+	let attempts = 0;
+	let currentIndex = index;
+	while (used.has(candidate) && attempts < wordList.length) {
+		currentIndex = (currentIndex + 1) % wordList.length;
+		candidate = wordList[currentIndex];
+		attempts++;
+	}
+	return candidate;
+}
+
+/** Today's 7-letter word for stage 7 (final circle). */
 export function getTodayWord7(): string {
 	loadWordList7();
-	const index = seedForStage(4) % wordList7.length;
+	const index = seedForStage(7) % wordList7.length;
 	return wordList7[index];
 }
 
@@ -185,12 +241,9 @@ export function validateGuessStage2(guess: string): { feedback: number[]; won: b
 
 /** Words in wordList that are consistent with every (guess, feedback) in history. */
 function wordsConsistentWith(history: { guess: string; feedback: number[] }[]): string[] {
-	const stage1Word = getTodayWord();
-	const stage2Word = getTodayWordStage2();
+	const used = getUsedWordsForStages([1, 2, 4, 5, 6]);
 	return wordList.filter((secret) => {
-		// Exclude stage 1 and stage 2 words from stage 3's consistent set
-		if (secret === stage1Word || secret === stage2Word) return false;
-		// Check consistency with history
+		if (used.has(secret)) return false;
 		return history.every(({ guess, feedback }) => {
 			const f = getFeedback(secret, guess);
 			return f.every((v, i) => v === feedback[i]);
@@ -234,9 +287,41 @@ export function validateGuessStage3(
 	return { feedback, won };
 }
 
-// ---- Stage 4: 7-letter Wordle ----
+// ---- Stages 4, 5, 6: 5-letter Wordle (each circle has its own word) ----
 
 export function validateGuessStage4(guess: string): { feedback: number[]; won: boolean } | { error: string } {
+	if (wordList.length === 0) loadWordList();
+	const g = guess.trim().toLowerCase();
+	if (g.length !== WORD_LENGTH) return { error: 'Guess must be 5 letters' };
+	if (!wordList.includes(g)) return { error: 'Not in word list' };
+	const secret = getTodayWordStage4();
+	const feedback = getFeedback(secret, g);
+	return { feedback, won: feedback.every((v) => v === 2) };
+}
+
+export function validateGuessStage5(guess: string): { feedback: number[]; won: boolean } | { error: string } {
+	if (wordList.length === 0) loadWordList();
+	const g = guess.trim().toLowerCase();
+	if (g.length !== WORD_LENGTH) return { error: 'Guess must be 5 letters' };
+	if (!wordList.includes(g)) return { error: 'Not in word list' };
+	const secret = getTodayWordStage5();
+	const feedback = getFeedback(secret, g);
+	return { feedback, won: feedback.every((v) => v === 2) };
+}
+
+export function validateGuessStage6(guess: string): { feedback: number[]; won: boolean } | { error: string } {
+	if (wordList.length === 0) loadWordList();
+	const g = guess.trim().toLowerCase();
+	if (g.length !== WORD_LENGTH) return { error: 'Guess must be 5 letters' };
+	if (!wordList.includes(g)) return { error: 'Not in word list' };
+	const secret = getTodayWordStage6();
+	const feedback = getFeedback(secret, g);
+	return { feedback, won: feedback.every((v) => v === 2) };
+}
+
+// ---- Stage 7: 7-letter Wordle (final circle) ----
+
+export function validateGuessStage7(guess: string): { feedback: number[]; won: boolean } | { error: string } {
 	loadWordList7();
 	const g = guess.trim().toLowerCase();
 	if (g.length !== WORD_LENGTH_7) return { error: 'Guess must be 7 letters' };

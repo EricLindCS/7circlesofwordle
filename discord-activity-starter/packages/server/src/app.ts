@@ -16,6 +16,9 @@ import {
 	validateGuessStage2,
 	validateGuessStage3,
 	validateGuessStage4,
+	validateGuessStage5,
+	validateGuessStage6,
+	validateGuessStage7,
 	getFeedbackForFirst5Letters,
 } from './game';
 import { getProgress, setProgress, resetProgress } from './progress';
@@ -119,9 +122,9 @@ app.post('/api/progress', async (req: Request, res: Response) => {
 		res.status(401).json({ error: 'Unauthorized' });
 		return;
 	}
-	const { stage, gameOver, victory, stage1, stage2, stage3, stage4, solvedWord1, solvedWord2, solvedWord3 } = req.body ?? {};
+	const { stage, gameOver, victory, stage1, stage2, stage3, stage4, stage5, stage6, stage7, solvedWord1, solvedWord2, solvedWord3, solvedWord4, solvedWord5, solvedWord6 } = req.body ?? {};
 	const patch: Record<string, unknown> = {
-		stage: typeof stage === 'number' && stage >= 1 && stage <= 4 ? stage : undefined,
+		stage: typeof stage === 'number' && stage >= 1 && stage <= 7 ? stage : undefined,
 		gameOver: typeof gameOver === 'boolean' ? gameOver : undefined,
 		victory: typeof victory === 'boolean' ? victory : undefined,
 	};
@@ -129,9 +132,15 @@ app.post('/api/progress', async (req: Request, res: Response) => {
 	if (stage2 != null && Array.isArray(stage2.completedRows)) patch.stage2 = stage2;
 	if (stage3 != null && Array.isArray(stage3.completedRows)) patch.stage3 = stage3;
 	if (stage4 != null && Array.isArray(stage4.completedRows)) patch.stage4 = stage4;
+	if (stage5 != null && Array.isArray(stage5.completedRows)) patch.stage5 = stage5;
+	if (stage6 != null && Array.isArray(stage6.completedRows)) patch.stage6 = stage6;
+	if (stage7 != null && Array.isArray(stage7.completedRows)) patch.stage7 = stage7;
 	if (typeof solvedWord1 === 'string') patch.solvedWord1 = solvedWord1;
 	if (typeof solvedWord2 === 'string') patch.solvedWord2 = solvedWord2;
 	if (typeof solvedWord3 === 'string') patch.solvedWord3 = solvedWord3;
+	if (typeof solvedWord4 === 'string') patch.solvedWord4 = solvedWord4;
+	if (typeof solvedWord5 === 'string') patch.solvedWord5 = solvedWord5;
+	if (typeof solvedWord6 === 'string') patch.solvedWord6 = solvedWord6;
 	setProgress(userId, patch as Parameters<typeof setProgress>[1]);
 	res.json({ ok: true });
 });
@@ -146,6 +155,9 @@ app.post('/api/reset', async (req: Request, res: Response) => {
 	res.json({ ok: true, message: 'Progress reset for today.' });
 });
 
+// Total score per user (all-time). Key: userId
+const totalScoreStore = new Map<string, number>();
+
 // Report score to channel/DM after game over or victory (requires BOT_TOKEN)
 app.post('/api/report-score', async (req: Request, res: Response) => {
 	const userId = await userIdFromToken(req);
@@ -158,24 +170,33 @@ app.post('/api/report-score', async (req: Request, res: Response) => {
 		res.status(503).json({ error: 'Score reporting not configured' });
 		return;
 	}
-	const { channelId, stageReached, victory, gameOver, username } = req.body ?? {};
+	const { channelId, stageReached, victory, gameOver, dailyScore, username } = req.body ?? {};
 	if (!channelId || typeof channelId !== 'string') {
 		res.json({ ok: true, skipped: true, reason: 'No channelId' });
 		return;
 	}
+	const daily = typeof dailyScore === 'number' && dailyScore >= 0 ? dailyScore : 0;
+	const prevTotal = totalScoreStore.get(userId) ?? 0;
+	const newTotal = prevTotal + daily;
+	totalScoreStore.set(userId, newTotal);
+
 	const stageNames: Record<number, string> = {
-		1: 'Stage 1 (Hangman)',
-		2: 'Stage 2 (Wordle)',
-		3: 'Stage 3 (Antagonistic Wordle)',
-		4: 'Stage 4 (7-letter Wordle)',
+		1: 'Circle 1 (Hangman)',
+		2: 'Circle 2 (Wordle)',
+		3: 'Circle 3 (Evil Wordle)',
+		4: 'Circle 4 (Eviler Wordle)',
+		5: 'Circle 5 (Evilest Wordle)',
+		6: 'Circle 6 (Wordle)',
+		7: 'Circle 7 (7-letter Wordle)',
 	};
-	const stageName = stageNames[Number(stageReached)] ?? `Stage ${stageReached}`;
+	const stageName = stageNames[Number(stageReached)] ?? `Circle ${stageReached}`;
 	const displayName = typeof username === 'string' && username.trim() ? username.trim() : `User <@${userId}>`;
+	const scoreLine = `Daily score: **${daily}** pts · Total score: **${newTotal}** pts`;
 	let content: string;
 	if (Boolean(victory)) {
-		content = `🎉 **7 Circles of Wordle** — ${displayName} completed all four stages today!`;
+		content = `**7 Circles of Wordle** — ${displayName} cleared all seven circles today! ${scoreLine}`;
 	} else {
-		content = `**7 Circles of Wordle** — ${displayName} reached ${stageName} and ${Boolean(gameOver) ? 'ran out of guesses.' : 'stopped.'}`;
+		content = `**7 Circles of Wordle** — ${displayName} reached ${stageName} and ${Boolean(gameOver) ? 'ran out of guesses.' : 'stopped.'} ${scoreLine}`;
 	}
 	try {
 		const discordRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
@@ -224,7 +245,7 @@ app.post('/api/hangman/guess', (req: Request, res: Response) => {
 	res.json(result);
 });
 
-// Wordle stages 2, 3, 4
+// Wordle stages 2–7
 app.post('/api/wordle/guess', (req: Request, res: Response) => {
 	const { guess, stage, history } = req.body ?? {};
 	const g = guess ?? '';
@@ -255,11 +276,38 @@ app.post('/api/wordle/guess', (req: Request, res: Response) => {
 		res.json(result);
 		return;
 	}
-	res.status(400).json({ error: 'Missing or invalid stage (2, 3, or 4)' });
+	if (stage === 5) {
+		const result = validateGuessStage5(g);
+		if ('error' in result) {
+			res.status(400).json({ error: result.error });
+			return;
+		}
+		res.json(result);
+		return;
+	}
+	if (stage === 6) {
+		const result = validateGuessStage6(g);
+		if ('error' in result) {
+			res.status(400).json({ error: result.error });
+			return;
+		}
+		res.json(result);
+		return;
+	}
+	if (stage === 7) {
+		const result = validateGuessStage7(g);
+		if ('error' in result) {
+			res.status(400).json({ error: result.error });
+			return;
+		}
+		res.json(result);
+		return;
+	}
+	res.status(400).json({ error: 'Missing or invalid stage (2–7)' });
 });
 
-// Get feedback for a 5-letter word against the first 5 letters of stage 4's 7-letter solution
-app.post('/api/wordle/stage4-prefill', (req: Request, res: Response) => {
+// Get feedback for a 5-letter word against the first 5 letters of stage 7's 7-letter solution
+app.post('/api/wordle/stage7-prefill', (req: Request, res: Response) => {
 	const { word5 } = req.body ?? {};
 	const w = String(word5 ?? '').trim().toLowerCase();
 	if (w.length !== 5) {
