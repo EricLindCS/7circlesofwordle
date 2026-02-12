@@ -46,6 +46,57 @@ body {
 	box-sizing: border-box;
 }
 
+/* Mobile: touch targets, safe area */
+html {
+	-webkit-text-size-adjust: 100%;
+	touch-action: manipulation;
+}
+body {
+	padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+	min-height: 100vh;
+	min-height: 100dvh;
+}
+#app {
+	padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-left)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-right));
+	min-height: 100vh;
+	min-height: 100dvh;
+}
+@media (max-width: 480px) {
+	.wordle-cell {
+		width: 2.25rem;
+		height: 2.25rem;
+		font-size: 1.1rem;
+	}
+	.wordle-grid-7 .wordle-cell {
+		width: 1.65rem;
+		height: 1.65rem;
+		font-size: 0.85rem;
+	}
+	.wordle-keyboard .keyboard-key {
+		min-height: 44px;
+		min-width: 1.5rem;
+		font-size: 0.7rem;
+	}
+	.key-enter, .key-backspace {
+		min-width: 2.25rem;
+	}
+	.reset-btn, .play-anyway-btn {
+		min-height: 44px;
+		padding: 0.6rem 1.2rem;
+	}
+	.wordle-title {
+		font-size: 1.35rem;
+	}
+	.hangman-word {
+		font-size: 1.5rem;
+		letter-spacing: 0.2em;
+	}
+}
+/* Prevent double-tap zoom on buttons */
+button {
+	touch-action: manipulation;
+}
+
 .wordle-title {
 	font-size: 1.75rem;
 	font-weight: 700;
@@ -101,6 +152,13 @@ body {
 	background: var(--wordle-absent);
 	border-color: var(--wordle-absent);
 	color: #b5bac1;
+}
+
+/* Stage 4: grayed-out blank cells (last 2 of first row) */
+.wordle-cell.blank {
+	background: var(--wordle-cell-bg);
+	border-color: var(--wordle-border);
+	opacity: 0.6;
 }
 
 .wordle-message {

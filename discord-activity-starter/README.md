@@ -63,7 +63,22 @@ Progress (stage, game over, victory) is stored per user per day. Relaunching the
 
 ### Enabling `/wordle-reset` (slash command)
 
-1. In the [Developer Portal](https://discord.com/developers/applications) → your app → **General Information**, copy **Public Key**. Add to `.env`: `PUBLIC_KEY=your_public_key_hex`.
+The app handles the interaction per [Discord Application Commands](https://discord.com/developers/interactions/application-commands#slash-command-interaction): type `2` = Application Command, response type `4` = CHANNEL_MESSAGE_WITH_SOURCE.
+
+**Option A — Register via script (CHAT_INPUT type 1):**
+
+1. In the [Developer Portal](https://discord.com/developers/applications) → your app → **General Information**, copy **Public Key**. Add to `.env`: `PUBLIC_KEY=your_public_key_hex`. Ensure `BOT_TOKEN` and `VITE_APPLICATION_ID` (or `VITE_CLIENT_ID`) are in `.env`.
 2. Set **Interactions Endpoint URL** to `https://your-tunnel.trycloudflare.com/api/discord/interactions` (use your real tunnel URL). Save.
-3. Create a slash command: **Commands** → **New Command**. Name: `wordle-reset`, description: e.g. "Reset your daily progress (for testing)". Save.
+3. From this directory run: `node scripts/register-slash-command.js` to register the slash command via the Discord API (type 1 = CHAT_INPUT).
 4. Run `npm install` in `packages/server` (adds `tweetnacl` for signature verification).
+
+**Option B — Manual:** **Commands** → **New Command**. Name: `wordle-reset`, description: e.g. "Reset your daily progress (for testing)". Save.
+
+### Score reporting
+
+When a player hits Game Over or completes all four stages (victory), the app sends a message to the **channel** where the activity is running (if `BOT_TOKEN` is set and the Embedded App SDK provides a `channelId`). The message reports how far they got or that they won. In DMs or when `channelId` is unavailable, reporting is skipped.
+
+### Progress and mobile
+
+- **Full progress:** Per-stage state is saved (Hangman revealed letters/wrong guesses, Wordle rows and current guess for each stage). Relaunching restores exactly where you left off, including words already guessed.
+- **Mobile:** The activity is responsive with touch-friendly tap targets (min 44px), safe-area insets, and viewport settings for small screens.

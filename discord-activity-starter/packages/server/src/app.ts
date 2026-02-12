@@ -5,14 +5,18 @@ import express, {
 	type Request,
 	type Response,
 } from 'express';
+import nacl from 'tweetnacl';
 import { fetchAndRetry } from './utils';
 import {
 	loadWordList,
+	getTodayWord,
+	getTodayWord7,
 	hangmanGuessLetter,
 	hangmanGuessWord,
 	validateGuessStage2,
 	validateGuessStage3,
 	validateGuessStage4,
+	getFeedbackForFirst5Letters,
 } from './game';
 import { getProgress, setProgress, resetProgress } from './progress';
 
@@ -51,7 +55,6 @@ app.post(
 	'/api/discord/interactions',
 	express.raw({ type: 'application/json' }),
 	async (req: Request, res: Response): Promise<void> => {
-		const nacl = await import('tweetnacl');
 		const sig = req.headers['x-signature-ed25519'] as string | undefined;
 		const timestamp = req.headers['x-signature-timestamp'] as string | undefined;
 		const publicKeyHex = process.env.PUBLIC_KEY;
@@ -116,12 +119,20 @@ app.post('/api/progress', async (req: Request, res: Response) => {
 		res.status(401).json({ error: 'Unauthorized' });
 		return;
 	}
-	const { stage, gameOver, victory } = req.body ?? {};
-	setProgress(userId, {
-		stage: typeof stage === 'number' ? stage : 1,
-		gameOver: Boolean(gameOver),
-		victory: Boolean(victory),
-	});
+	const { stage, gameOver, victory, stage1, stage2, stage3, stage4, solvedWord1, solvedWord2, solvedWord3 } = req.body ?? {};
+	const patch: Record<string, unknown> = {
+		stage: typeof stage === 'number' && stage >= 1 && stage <= 4 ? stage : undefined,
+		gameOver: typeof gameOver === 'boolean' ? gameOver : undefined,
+		victory: typeof victory === 'boolean' ? victory : undefined,
+	};
+	if (stage1 != null && Array.isArray(stage1.revealed)) patch.stage1 = stage1;
+	if (stage2 != null && Array.isArray(stage2.completedRows)) patch.stage2 = stage2;
+	if (stage3 != null && Array.isArray(stage3.completedRows)) patch.stage3 = stage3;
+	if (stage4 != null && Array.isArray(stage4.completedRows)) patch.stage4 = stage4;
+	if (typeof solvedWord1 === 'string') patch.solvedWord1 = solvedWord1;
+	if (typeof solvedWord2 === 'string') patch.solvedWord2 = solvedWord2;
+	if (typeof solvedWord3 === 'string') patch.solvedWord3 = solvedWord3;
+	setProgress(userId, patch as Parameters<typeof setProgress>[1]);
 	res.json({ ok: true });
 });
 
@@ -133,6 +144,59 @@ app.post('/api/reset', async (req: Request, res: Response) => {
 	}
 	resetProgress(userId);
 	res.json({ ok: true, message: 'Progress reset for today.' });
+});
+
+// Report score to channel/DM after game over or victory (requires BOT_TOKEN)
+app.post('/api/report-score', async (req: Request, res: Response) => {
+	const userId = await userIdFromToken(req);
+	if (!userId) {
+		res.status(401).json({ error: 'Unauthorized' });
+		return;
+	}
+	const botToken = process.env.BOT_TOKEN;
+	if (!botToken) {
+		res.status(503).json({ error: 'Score reporting not configured' });
+		return;
+	}
+	const { channelId, stageReached, victory, gameOver, username } = req.body ?? {};
+	if (!channelId || typeof channelId !== 'string') {
+		res.json({ ok: true, skipped: true, reason: 'No channelId' });
+		return;
+	}
+	const stageNames: Record<number, string> = {
+		1: 'Stage 1 (Hangman)',
+		2: 'Stage 2 (Wordle)',
+		3: 'Stage 3 (Antagonistic Wordle)',
+		4: 'Stage 4 (7-letter Wordle)',
+	};
+	const stageName = stageNames[Number(stageReached)] ?? `Stage ${stageReached}`;
+	const displayName = typeof username === 'string' && username.trim() ? username.trim() : `User <@${userId}>`;
+	let content: string;
+	if (Boolean(victory)) {
+		content = `🎉 **7 Circles of Wordle** — ${displayName} completed all four stages today!`;
+	} else {
+		content = `**7 Circles of Wordle** — ${displayName} reached ${stageName} and ${Boolean(gameOver) ? 'ran out of guesses.' : 'stopped.'}`;
+	}
+	try {
+		const discordRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: `Bot ${botToken}`,
+			},
+			body: JSON.stringify({ content }),
+		});
+		if (!discordRes.ok) {
+			const err = await discordRes.text();
+			console.warn('[report-score] Discord API error:', discordRes.status, err);
+			res.status(502).json({ error: 'Failed to send message to channel' });
+			return;
+		}
+		res.json({ ok: true });
+	} catch (e) {
+		console.warn('[report-score]', e);
+		res.status(500).json({ error: 'Failed to report score' });
+	}
 });
 
 if (process.env.NODE_ENV === 'production') {
@@ -192,6 +256,19 @@ app.post('/api/wordle/guess', (req: Request, res: Response) => {
 		return;
 	}
 	res.status(400).json({ error: 'Missing or invalid stage (2, 3, or 4)' });
+});
+
+// Get feedback for a 5-letter word against the first 5 letters of stage 4's 7-letter solution
+app.post('/api/wordle/stage4-prefill', (req: Request, res: Response) => {
+	const { word5 } = req.body ?? {};
+	const w = String(word5 ?? '').trim().toLowerCase();
+	if (w.length !== 5) {
+		res.status(400).json({ error: 'Word must be 5 letters' });
+		return;
+	}
+	const secret7 = getTodayWord7();
+	const feedback = getFeedbackForFirst5Letters(secret7, w);
+	res.json({ feedback });
 });
 
 // Fetch token from developer portal and return to the embedded app

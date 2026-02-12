@@ -21,9 +21,19 @@ function getTodaySeed(): number {
 }
 
 function seedForStage(stage: number): number {
-	let h = getTodaySeed();
-	for (let i = 0; i < stage; i++) h = (h * 31 + 1) | 0;
-	return Math.abs(h);
+	// Create a deterministic seed per (date, stage) by hashing the date string
+	// combined with the stage number. This avoids collisions caused by the
+	// prior iterative transform and guarantees different stages map to
+	// different seeds (modulo word list length).
+	const today = new Date();
+	const dateStr = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
+	const key = `${dateStr}:${stage}`;
+	let hash = 0;
+	for (let i = 0; i < key.length; i++) {
+		hash = (hash << 5) - hash + key.charCodeAt(i);
+		hash |= 0;
+	}
+	return Math.abs(hash);
 }
 
 export function loadWordList(): void {
@@ -46,14 +56,33 @@ function loadWordList7(): void {
 		.filter((w) => w.length === WORD_LENGTH_7);
 }
 
-/** Today's 5-letter word (hangman + stage 2). */
+/** Today's 5-letter word for stage 1 (Hangman). One random word per day, same for all users. */
 export function getTodayWord(): string {
 	if (wordList.length === 0) loadWordList();
-	const index = getTodaySeed() % wordList.length;
+	const index = seedForStage(1) % wordList.length;
 	return wordList[index];
 }
 
-/** Today's 7-letter word (stage 4). */
+/** Today's 5-letter word for stage 2 (Wordle). Different from stage 1, rolled daily. */
+export function getTodayWordStage2(): string {
+	if (wordList.length === 0) loadWordList();
+	const stage1Word = getTodayWord();
+	const index = seedForStage(2) % wordList.length;
+	
+	// Ensure stage 2 word is not the same as stage 1 (hangman).
+	// Try words starting from the seeded index until we find one that's different
+	let candidate = wordList[index];
+	let attempts = 0;
+	let currentIndex = index;
+	while (candidate === stage1Word && attempts < wordList.length) {
+		currentIndex = (currentIndex + 1) % wordList.length;
+		candidate = wordList[currentIndex];
+		attempts++;
+	}
+	return candidate;
+}
+
+/** Today's 7-letter word for stage 4. Random from list, rolled daily. */
 export function getTodayWord7(): string {
 	loadWordList7();
 	const index = seedForStage(4) % wordList7.length;
@@ -114,14 +143,40 @@ function getFeedback7(secret: string, guess: string): number[] {
 	return getFeedbackFor(secret, guess, WORD_LENGTH_7);
 }
 
-// ---- Stage 2: Wordle with hangman word ----
+/** Get feedback for a 5-letter word against the first 5 letters of a 7-letter word.
+ *  Considers the full 7-letter word for letter counts (yellow feedback). */
+export function getFeedbackForFirst5Letters(secret7: string, guess5: string): number[] {
+	const result: number[] = new Array(5).fill(0);
+	const secretCount: Record<string, number> = {};
+	// Count all letters in the 7-letter word
+	for (const c of secret7) secretCount[c] = (secretCount[c] ?? 0) + 1;
+	// First pass: mark correct positions (green) in first 5 letters
+	for (let i = 0; i < 5; i++) {
+		if (guess5[i] === secret7[i]) {
+			result[i] = 2;
+			secretCount[secret7[i]]--;
+		}
+	}
+	// Second pass: mark present letters (yellow) considering full 7-letter word
+	for (let i = 0; i < 5; i++) {
+		if (result[i] === 2) continue;
+		const c = guess5[i];
+		if (secretCount[c] != null && secretCount[c] > 0) {
+			result[i] = 1;
+			secretCount[c]--;
+		}
+	}
+	return result;
+}
+
+// ---- Stage 2: Wordle (own daily word) ----
 
 export function validateGuessStage2(guess: string): { feedback: number[]; won: boolean } | { error: string } {
 	if (wordList.length === 0) loadWordList();
 	const g = guess.trim().toLowerCase();
 	if (g.length !== WORD_LENGTH) return { error: 'Guess must be 5 letters' };
 	if (!wordList.includes(g)) return { error: 'Not in word list' };
-	const secret = getTodayWord();
+	const secret = getTodayWordStage2();
 	const feedback = getFeedback(secret, g);
 	return { feedback, won: feedback.every((v) => v === 2) };
 }
@@ -130,12 +185,17 @@ export function validateGuessStage2(guess: string): { feedback: number[]; won: b
 
 /** Words in wordList that are consistent with every (guess, feedback) in history. */
 function wordsConsistentWith(history: { guess: string; feedback: number[] }[]): string[] {
-	return wordList.filter((secret) =>
-		history.every(({ guess, feedback }) => {
+	const stage1Word = getTodayWord();
+	const stage2Word = getTodayWordStage2();
+	return wordList.filter((secret) => {
+		// Exclude stage 1 and stage 2 words from stage 3's consistent set
+		if (secret === stage1Word || secret === stage2Word) return false;
+		// Check consistency with history
+		return history.every(({ guess, feedback }) => {
 			const f = getFeedback(secret, guess);
 			return f.every((v, i) => v === feedback[i]);
-		})
-	);
+		});
+	});
 }
 
 /** Adversarial: given history and new guess, return feedback that maximizes the size of the remaining consistent set. */
