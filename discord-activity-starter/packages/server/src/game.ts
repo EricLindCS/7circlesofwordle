@@ -126,7 +126,7 @@ export function validateAnagramStage3(guess: string): { won: boolean } | { error
 	if (wordList.length === 0) loadWordList();
 	const g = guess.trim().toLowerCase();
 	if (g.length !== WORD_LENGTH) return { error: 'Guess must be 5 letters' };
-	if (!wordList.includes(g)) return { error: 'Not in word list' };
+	if (!/^[a-z]+$/.test(g)) return { error: 'Letters only' };
 	const secret = getTodayWordStage3();
 	const won = sortLetters(g) === sortLetters(secret);
 	return { won };
@@ -136,7 +136,7 @@ function sortLetters(w: string): string {
 	return w.split('').sort().join('');
 }
 
-/** Stage 4: Another 5-letter Wordle. */
+/** Stage 4: Word Chain — starting word for today. */
 export function getTodayWordStage4(): string {
 	if (wordList.length === 0) loadWordList();
 	const used = getUsed5LetterWords([1, 2, 3]);
@@ -150,6 +150,35 @@ export function getTodayWordStage4(): string {
 		attempts++;
 	}
 	return candidate;
+}
+
+/** Stage 4: Word Chain — validate a chain word.
+ *  `previousWord` is the last word in the chain so far.
+ *  `chain` is all words in the chain so far (including the starting word).
+ *  The guess must start with the last letter of previousWord, be a valid 5-letter word,
+ *  and must NOT reuse any starting or ending letter already used in the chain. */
+export function validateChainWord(guess: string, previousWord: string, chain?: string[]): { valid: boolean; error?: string } {
+	if (wordList.length === 0) loadWordList();
+	const g = guess.trim().toLowerCase();
+	const prev = previousWord.trim().toLowerCase();
+	if (g.length !== WORD_LENGTH) return { valid: false, error: 'Word must be 5 letters' };
+	if (!wordList.includes(g)) return { valid: false, error: 'Not in word list' };
+	const requiredStart = prev[prev.length - 1];
+	if (g[0] !== requiredStart) return { valid: false, error: `Word must start with "${requiredStart.toUpperCase()}"` };
+
+	// Check for repeated starting/ending letters
+	if (chain && chain.length > 0) {
+		const usedStartLetters = new Set(chain.map(w => w[0].toLowerCase()));
+		const usedEndLetters = new Set(chain.map(w => w[w.length - 1].toLowerCase()));
+		if (usedStartLetters.has(g[0])) {
+			return { valid: false, error: `A word already starts with "${g[0].toUpperCase()}" — pick a different word!` };
+		}
+		if (usedEndLetters.has(g[g.length - 1])) {
+			return { valid: false, error: `A word already ends with "${g[g.length - 1].toUpperCase()}" — pick a different word!` };
+		}
+	}
+
+	return { valid: true };
 }
 
 /** Stage 5: Antagonistic Wordle – no single word; adversary picks. */

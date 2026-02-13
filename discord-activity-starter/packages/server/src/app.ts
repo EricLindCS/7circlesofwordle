@@ -19,8 +19,8 @@ import {
 	hangmanGuessWord,
 	getAnagramLettersStage3,
 	validateAnagramStage3,
+	validateChainWord,
 	validateGuessStage2,
-	validateGuessStage4,
 	validateGuessStage5,
 	validateGuessStage6,
 	validateGuessStage7,
@@ -188,20 +188,48 @@ app.post('/api/report-score', async (req: Request, res: Response) => {
 	const stageNames: Record<number, string> = {
 		1: 'Circle 1 (Hangman)',
 		2: 'Circle 2 (Wordle)',
-		3: 'Circle 3 (Unscramble)',
-		4: 'Circle 4 (Wordle)',
-		5: 'Circle 5 (Antagonistic Wordle)',
-		6: 'Circle 6 (6-letter Wordle)',
-		7: 'Circle 7 (7-letter Wordle)',
+		3: 'Circle 3 (Anagrams)',
+		4: 'Circle 4 (Chains)',
+		5: 'Circle 5 (Totally Normal Wordle)',
+		6: 'Circle 6 (Big Wordle)',
+		7: 'Circle 7 (Evil Wordle)',
 	};
 	const stageName = stageNames[Number(stageReached)] ?? `Circle ${stageReached}`;
 	const displayName = typeof username === 'string' && username.trim() ? username.trim() : `User <@${userId}>`;
 	const scoreLine = `Daily score: **${daily}** pts · Total score: **${newTotal}** pts`;
+
+	// Randomized flavor messages
+	const defeatVerbs = [
+		`burned up at ${stageName}`,
+		`fell into the abyss at ${stageName}`,
+		`got cooked at ${stageName}`,
+		`was consumed by flames at ${stageName}`,
+		`got toasted at ${stageName}`,
+		`tripped into the fire at ${stageName}`,
+		`couldn't escape ${stageName}`,
+		`met their doom at ${stageName}`,
+		`got roasted at ${stageName}`,
+		`was swallowed whole by ${stageName}`,
+	];
+	const victoryVerbs = [
+		'conquered all seven circles!',
+		'escaped the flames unscathed!',
+		'survived all seven circles somehow!',
+		'made it out alive!',
+		'walked through fire and emerged victorious!',
+		'is officially flame-proof!',
+		'beat all seven circles and lived to tell the tale!',
+		'danced through every circle like it was nothing!',
+	];
+	const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+
 	let content: string;
 	if (Boolean(victory)) {
-		content = `**7 Circles of Wordle** — ${displayName} cleared all seven circles today! ${scoreLine}`;
+		content = `🔥 **7 Circles of Wordle** — **${displayName}** ${pick(victoryVerbs)} 🎉\n${scoreLine}`;
+	} else if (Boolean(gameOver)) {
+		content = `🕯️ **7 Circles of Wordle** — **${displayName}** ${pick(defeatVerbs)} 💀\n${scoreLine}`;
 	} else {
-		content = `**7 Circles of Wordle** — ${displayName} reached ${stageName} and ${Boolean(gameOver) ? 'ran out of guesses.' : 'stopped.'} ${scoreLine}`;
+		content = `🕯️ **7 Circles of Wordle** — **${displayName}** wandered away at ${stageName}.\n${scoreLine}`;
 	}
 	try {
 		const discordRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
@@ -265,7 +293,27 @@ app.post('/api/anagram/guess', (req: Request, res: Response) => {
 	res.json(result);
 });
 
-// Wordle stages 2, 4, 5 (5-letter), 6 (6-letter), 7 (7-letter). Stage 3 is anagram.
+// Stage 4: Word Chain
+app.get('/api/chain/start', (_req: Request, res: Response) => {
+	res.json({ word: getTodayWordStage4() });
+});
+
+app.post('/api/chain/validate', (req: Request, res: Response) => {
+	const { guess, previousWord, chain } = req.body ?? {};
+	if (!guess || !previousWord) {
+		res.status(400).json({ error: 'Missing guess or previousWord' });
+		return;
+	}
+	const chainArr = Array.isArray(chain) ? chain.map(String) : undefined;
+	const result = validateChainWord(String(guess), String(previousWord), chainArr);
+	if (!result.valid) {
+		res.status(400).json({ error: result.error ?? 'Invalid word' });
+		return;
+	}
+	res.json({ valid: true });
+});
+
+// Wordle stages 2, 5 (5-letter), 6 (6-letter), 7 (7-letter). Stage 3 is anagram, Stage 4 is chain.
 app.post('/api/wordle/guess', (req: Request, res: Response) => {
 	const { guess, stage, history } = req.body ?? {};
 	const g = guess ?? '';
@@ -280,15 +328,6 @@ app.post('/api/wordle/guess', (req: Request, res: Response) => {
 			}
 		}
 		const result = validateGuessStage2(g);
-		if ('error' in result) {
-			res.status(400).json({ error: result.error });
-			return;
-		}
-		res.json(result);
-		return;
-	}
-	if (stage === 4) {
-		const result = validateGuessStage4(g);
 		if ('error' in result) {
 			res.status(400).json({ error: result.error });
 			return;

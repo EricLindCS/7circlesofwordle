@@ -16,11 +16,11 @@ const FLIP_DELAY_MS = 120;
 const CIRCLE_NAMES: Record<number, string> = {
 	1: 'Circle 1: Hangman',
 	2: 'Circle 2: Wordle',
-	3: 'Circle 3: Unscramble',
-	4: 'Circle 4: Wordle',
-	5: 'Circle 5: Antagonistic Wordle',
-	6: 'Circle 6: 6-letter Wordle',
-	7: 'Circle 7: 7-letter Wordle',
+	3: 'Circle 3: Anagrams',
+	4: 'Circle 4: Chains',
+	5: 'Circle 5: Totally Normal Wordle',
+	6: 'Circle 6: Big Wordle',
+	7: 'Circle 7: Evil Wordle',
 };
 
 type CellState = { letter: string; feedback: typeof FEEDBACK[keyof typeof FEEDBACK] | null };
@@ -61,8 +61,9 @@ async function setupDiscordSdk(): Promise<void> {
 function renderGameOver(app: HTMLDivElement, onReset: (() => void) | null): void {
 	app.innerHTML = `
 		<div class="screen screen-gameover">
-			<h1 class="screen-title">Game Over</h1>
-			<p class="screen-text">Try again tomorrow.</p>
+			<div style="font-size:3.5rem;margin-bottom:0.5rem">�🕯️</div>
+			<h1 class="screen-title">Oh no!</h1>
+			<p class="screen-text">The flame flickers out… try again tomorrow!</p>
 			${onReset ? '<button type="button" class="reset-btn">Reset my progress (testing)</button>' : ''}
 		</div>
 	`;
@@ -70,14 +71,70 @@ function renderGameOver(app: HTMLDivElement, onReset: (() => void) | null): void
 }
 
 function renderVictory(app: HTMLDivElement, onReset: (() => void) | null): void {
+	// Create sparkle particles
+	let sparklesHtml = '';
+	for (let i = 0; i < 20; i++) {
+		const left = Math.random() * 100;
+		const delay = Math.random() * 3;
+		const size = 2 + Math.random() * 4;
+		const hue = 30 + Math.random() * 40; // warm golden range
+		sparklesHtml += `<div class="victory-ember" style="left:${left}%;bottom:-10px;width:${size}px;height:${size}px;background:hsl(${hue},90%,65%);animation-delay:${delay}s;animation-duration:${2 + Math.random() * 2}s"></div>`;
+	}
 	app.innerHTML = `
 		<div class="screen screen-victory">
-			<h1 class="screen-title">You did it!</h1>
-			<p class="screen-text">All seven circles complete. See you tomorrow.</p>
+			<div class="victory-embers">${sparklesHtml}</div>
+			<div style="font-size:4rem;margin-bottom:0.5rem">🎉🔥🎉</div>
+			<h1 class="screen-title">All Seven Circles Complete!</h1>
+			<p class="screen-text">You did it!! Every circle cleared 🥳<br>See you tomorrow for a new challenge ✨</p>
 			${onReset ? '<button type="button" class="reset-btn">Reset my progress (testing)</button>' : ''}
 		</div>
 	`;
 	if (onReset) app.querySelector('.reset-btn')?.addEventListener('click', onReset);
+}
+
+/** Cute inter-stage congratulations screen. Shows for 3s then calls onDone. */
+function renderStageCongrats(
+	app: HTMLDivElement,
+	completedCircle: number,
+	nextCircle: number,
+	signal: AbortSignal,
+	onDone: () => void
+): void {
+	const nextLabel = CIRCLE_NAMES[nextCircle] ?? `Circle ${nextCircle}`;
+	// Teasing per-stage messages that get progressively more cheeky
+	const stageMessages: Record<number, string> = {
+		1: 'Aww, you\'re doing great 🥺',
+		2: 'Okay smarty-pants… �',
+		3: 'You\'re so smart!! …for now 💅',
+		4: 'Wow you\'re actually good at this 😳',
+		5: 'You won\'t last much longer 🫣',
+		6: 'Wait, you\'re still going?? �',
+	};
+	const cheer = stageMessages[completedCircle] ?? 'Not bad… 👀';
+
+	const wrapper = document.createElement('div');
+	wrapper.className = 'stage-congrats';
+	wrapper.innerHTML = `
+		<div class="congrats-flame-ring"></div>
+		<div class="congrats-circle-num">${completedCircle} / 7</div>
+		<div class="congrats-label">Circle ${completedCircle} — Complete!</div>
+		<div class="congrats-title">${cheer}</div>
+		<div class="congrats-subtitle">Up next: ${nextLabel}</div>
+		<div class="congrats-progress-bar"><div class="congrats-progress-fill" style="width:0%"></div></div>
+	`;
+	app.appendChild(wrapper);
+
+	// Animate progress bar
+	requestAnimationFrame(() => {
+		const fill = app.querySelector('.congrats-progress-fill') as HTMLElement;
+		if (fill) fill.style.width = '100%';
+	});
+
+	const timer = setTimeout(() => {
+		if (!signal.aborted) onDone();
+	}, 3000);
+
+	signal.addEventListener('abort', () => clearTimeout(timer));
 }
 
 // ---- Stage 1: Hangman ----
@@ -189,30 +246,41 @@ function renderHangman(
 	msgDiv.className = 'hangman-message wordle-message';
 	app.appendChild(msgDiv);
 
-	const keys = 'Q W E R T Y U I O P A S D F G H J K L Z X C V B N M'.split(' ');
+	const keyRows = [
+		'Q W E R T Y U I O P'.split(' '),
+		'A S D F G H J K L'.split(' '),
+		['Enter', ...'Z X C V B N M'.split(' '), 'Backspace'],
+	];
 	const keyboard = document.createElement('div');
 	keyboard.className = 'wordle-keyboard';
-	const row1 = document.createElement('div');
-	row1.className = 'keyboard-row';
-	keys.forEach((key) => {
-		const btn = document.createElement('button');
-		btn.type = 'button';
-		btn.className = 'keyboard-key';
-		btn.textContent = key;
-		btn.addEventListener('click', () => guessLetter(key));
-		row1.appendChild(btn);
+	keyRows.forEach((keyRow) => {
+		const rowEl = document.createElement('div');
+		rowEl.className = 'keyboard-row';
+		keyRow.forEach((key) => {
+			const btn = document.createElement('button');
+			btn.type = 'button';
+			btn.className = 'keyboard-key';
+			if (key === 'Enter') btn.className += ' key-enter';
+			if (key === 'Backspace') btn.className += ' key-backspace';
+			btn.textContent = key === 'Backspace' ? '⌫' : key === 'Enter' ? 'Enter' : key;
+			btn.addEventListener('click', () => {
+				if (key === 'Enter') {
+					guessWord();
+				} else if (key === 'Backspace') {
+					currentWordGuess = currentWordGuess.slice(0, -1);
+					updateUI();
+				} else {
+					if (currentWordGuess.length < WORD_LENGTH) {
+						currentWordGuess += key;
+						updateUI();
+					}
+					guessLetter(key);
+				}
+			});
+			rowEl.appendChild(btn);
+		});
+		keyboard.appendChild(rowEl);
 	});
-	keyboard.appendChild(row1);
-
-	const enterRow = document.createElement('div');
-	enterRow.className = 'keyboard-row';
-	const enterBtn = document.createElement('button');
-	enterBtn.type = 'button';
-	enterBtn.className = 'keyboard-key key-enter';
-	enterBtn.textContent = 'Enter (guess word)';
-	enterBtn.addEventListener('click', () => guessWord());
-	enterRow.appendChild(enterBtn);
-	keyboard.appendChild(enterRow);
 
 	app.appendChild(keyboard);
 
@@ -287,6 +355,8 @@ function renderAnagram(
 		});
 		const data = await res.json();
 		if (!res.ok) {
+			// Server rejected the guess (e.g. not in word list) — allow retry
+			submitted = false;
 			setMsg(data.error ?? 'Invalid guess', true);
 			return;
 		}
@@ -334,6 +404,38 @@ function renderAnagram(
 		}
 	});
 
+	// On-screen keyboard for mobile
+	const keyRows = [
+		'Q W E R T Y U I O P'.split(' '),
+		'A S D F G H J K L'.split(' '),
+		['Enter', ...'Z X C V B N M'.split(' '), 'Backspace'],
+	];
+	const keyboard = document.createElement('div');
+	keyboard.className = 'wordle-keyboard';
+	keyRows.forEach((keyRow) => {
+		const rowEl = document.createElement('div');
+		rowEl.className = 'keyboard-row';
+		keyRow.forEach((key) => {
+			const kbtn = document.createElement('button');
+			kbtn.type = 'button';
+			kbtn.className = 'keyboard-key';
+			if (key === 'Enter') kbtn.className += ' key-enter';
+			if (key === 'Backspace') kbtn.className += ' key-backspace';
+			kbtn.textContent = key === 'Backspace' ? '⌫' : key;
+			kbtn.addEventListener('click', () => {
+				if (key === 'Enter') {
+					submitGuess();
+				} else if (key === 'Backspace') {
+					input.value = input.value.slice(0, -1);
+				} else if (input.value.length < WORD_LENGTH) {
+					input.value += key.toLowerCase();
+				}
+			});
+			rowEl.appendChild(kbtn);
+		});
+		keyboard.appendChild(rowEl);
+	});
+
 	app.innerHTML = '';
 	app.appendChild(title);
 	app.appendChild(lettersDiv);
@@ -341,6 +443,7 @@ function renderAnagram(
 	app.appendChild(input);
 	app.appendChild(msg);
 	app.appendChild(btn);
+	app.appendChild(keyboard);
 
 	fetchLetters().then(() => {
 		if (letters && lettersDiv.textContent === '…') {
@@ -349,11 +452,313 @@ function renderAnagram(
 	});
 }
 
-// ---- Wordle 5 (stages 2, 4, 5) ----
+// ---- Stage 4: Word Chain ----
+
+const CHAIN_LENGTH = 4; // number of words the player must add
+const CHAIN_TIME_LIMIT = 60; // seconds
+
+type Stage4ChainData = {
+	startWord: string;
+	chain: string[]; // words submitted so far (not including startWord)
+	timeLeft: number;
+	finished: boolean;
+};
+
+function renderWordChain(
+	app: HTMLDivElement,
+	onWin: (solvedWord?: string) => void,
+	onGameOver: () => void,
+	initialStage4?: Stage4ChainData | null,
+	onSaveStage4?: (data: Stage4ChainData) => void,
+	signal?: AbortSignal
+): void {
+	let startWord = initialStage4?.startWord ?? '';
+	let chain: string[] = initialStage4?.chain ? [...initialStage4.chain] : [];
+	let timeLeft = initialStage4?.timeLeft ?? CHAIN_TIME_LIMIT;
+	let finished = initialStage4?.finished ?? false;
+	let currentInput = '';
+	let timerInterval: ReturnType<typeof setInterval> | null = null;
+
+	function save(): void {
+		onSaveStage4?.({ startWord, chain: [...chain], timeLeft, finished });
+	}
+
+	function allWords(): string[] {
+		return [startWord, ...chain];
+	}
+
+	function lastWord(): string {
+		const all = allWords();
+		return all[all.length - 1];
+	}
+
+	function requiredLetter(): string {
+		const lw = lastWord();
+		return lw[lw.length - 1].toUpperCase();
+	}
+
+	function setMsg(text: string, isError = false): void {
+		const el = app.querySelector('.chain-message');
+		if (el) {
+			el.textContent = text;
+			el.className = 'chain-message' + (isError ? ' error' : '');
+		}
+	}
+
+	function updateTimerDisplay(): void {
+		const el = app.querySelector('.chain-timer');
+		if (el) {
+			const mins = Math.floor(timeLeft / 60);
+			const secs = timeLeft % 60;
+			el.textContent = `${mins}:${String(secs).padStart(2, '0')}`;
+			if (timeLeft <= 10) el.classList.add('chain-timer-urgent');
+			else el.classList.remove('chain-timer-urgent');
+		}
+	}
+
+	function renderChainDisplay(): void {
+		const container = app.querySelector('.chain-links');
+		if (!container) return;
+		container.innerHTML = '';
+		const all = allWords();
+		all.forEach((word, i) => {
+			const link = document.createElement('div');
+			link.className = 'chain-link' + (i === 0 ? ' chain-link-start' : ' chain-link-player');
+			// Highlight the linking letters
+			const letters = word.toUpperCase().split('');
+			letters.forEach((letter, j) => {
+				const span = document.createElement('span');
+				span.className = 'chain-letter';
+				// First letter links to previous word's last letter
+				if (i > 0 && j === 0) span.classList.add('chain-letter-link');
+				// Last letter is the bridge to the next word
+				if (j === letters.length - 1 && i < all.length - 1) span.classList.add('chain-letter-link');
+				// Last letter of the last word is the required start for next
+				if (j === letters.length - 1 && i === all.length - 1 && chain.length < CHAIN_LENGTH) span.classList.add('chain-letter-next');
+				span.textContent = letter;
+				link.appendChild(span);
+			});
+			container.appendChild(link);
+			// Add connector arrow between words
+			if (i < all.length - 1) {
+				const arrow = document.createElement('div');
+				arrow.className = 'chain-arrow';
+				arrow.textContent = '🔗';
+				container.appendChild(arrow);
+			}
+		});
+		// Show empty slots for remaining chain links
+		for (let i = chain.length; i < CHAIN_LENGTH; i++) {
+			const arrow = document.createElement('div');
+			arrow.className = 'chain-arrow chain-arrow-empty';
+			arrow.textContent = '🔗';
+			container.appendChild(arrow);
+			const slot = document.createElement('div');
+			slot.className = 'chain-link chain-link-empty';
+			slot.textContent = '? ? ? ? ?';
+			container.appendChild(slot);
+		}
+	}
+
+	function updateInputDisplay(): void {
+		const inputDisplay = app.querySelector('.chain-input-display');
+		if (!inputDisplay) return;
+		inputDisplay.innerHTML = '';
+		for (let i = 0; i < WORD_LENGTH; i++) {
+			const cellEl = document.createElement('span');
+			cellEl.className = 'chain-input-cell' + (currentInput[i] ? ' filled' : '');
+			cellEl.textContent = (currentInput[i] ?? '').toUpperCase();
+			// Highlight first cell with required letter hint
+			if (i === 0 && !currentInput[0]) {
+				cellEl.textContent = requiredLetter();
+				cellEl.classList.add('chain-input-hint');
+			}
+			inputDisplay.appendChild(cellEl);
+		}
+	}
+
+	function startTimer(): void {
+		if (timerInterval || finished) return;
+		timerInterval = setInterval(() => {
+			if (signal?.aborted) { stopTimer(); return; }
+			timeLeft--;
+			updateTimerDisplay();
+			save();
+			if (timeLeft <= 0) {
+				stopTimer();
+				finished = true;
+				save();
+				setMsg('Time\'s up! 💀', true);
+				onGameOver();
+			}
+		}, 1000);
+	}
+
+	function stopTimer(): void {
+		if (timerInterval) {
+			clearInterval(timerInterval);
+			timerInterval = null;
+		}
+	}
+
+	// Clean up timer if render is aborted
+	signal?.addEventListener('abort', () => stopTimer());
+
+	let submitting = false;
+	async function submitWord(): Promise<void> {
+		if (submitting || finished || currentInput.length !== WORD_LENGTH) return;
+		submitting = true;
+		setMsg('');
+		try {
+			const res = await fetch('/api/chain/validate', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ guess: currentInput.toLowerCase(), previousWord: lastWord(), chain: allWords().map(w => w.toLowerCase()) }),
+			});
+			if (signal?.aborted) return;
+			const data = await res.json();
+			if (!res.ok) {
+				setMsg(data.error ?? 'Invalid word', true);
+				return;
+			}
+			// Valid chain word!
+			chain.push(currentInput.toLowerCase());
+			currentInput = '';
+			save();
+			renderChainDisplay();
+			updateInputDisplay();
+
+			if (chain.length >= CHAIN_LENGTH) {
+				// Won!
+				stopTimer();
+				finished = true;
+				save();
+				setMsg('Chain complete! 🔗🔥', false);
+				onWin(chain[chain.length - 1]);
+			} else {
+				setMsg(`${CHAIN_LENGTH - chain.length} more to go! Next word starts with "${requiredLetter()}"`, false);
+			}
+		} finally {
+			submitting = false;
+		}
+	}
+
+	function handleKey(key: string): void {
+		if (finished) return;
+		if (key === 'Enter') {
+			if (currentInput.length === WORD_LENGTH) submitWord();
+			else setMsg('Not enough letters', true);
+			return;
+		}
+		if (key === 'Backspace') {
+			currentInput = currentInput.slice(0, -1);
+			updateInputDisplay();
+			setMsg('');
+			return;
+		}
+		if (key.length === 1 && /^[A-Za-z]$/.test(key) && currentInput.length < WORD_LENGTH) {
+			currentInput += key.toUpperCase();
+			updateInputDisplay();
+			setMsg('');
+		}
+	}
+
+	// Build UI
+	app.innerHTML = '';
+	const title = document.createElement('h1');
+	title.className = 'wordle-title';
+	title.textContent = CIRCLE_NAMES[4];
+	app.appendChild(title);
+
+	const subtitle = document.createElement('p');
+	subtitle.className = 'chain-subtitle';
+	subtitle.textContent = `Build a chain of ${CHAIN_LENGTH} words! Each must start with the last letter of the previous.`;
+	app.appendChild(subtitle);
+
+	const timer = document.createElement('div');
+	timer.className = 'chain-timer';
+	app.appendChild(timer);
+
+	const linksContainer = document.createElement('div');
+	linksContainer.className = 'chain-links';
+	app.appendChild(linksContainer);
+
+	const inputDisplay = document.createElement('div');
+	inputDisplay.className = 'chain-input-display';
+	app.appendChild(inputDisplay);
+
+	const msg = document.createElement('div');
+	msg.className = 'chain-message';
+	app.appendChild(msg);
+
+	// Keyboard
+	const keys = [
+		'Q W E R T Y U I O P'.split(' '),
+		'A S D F G H J K L'.split(' '),
+		['Enter', ...'Z X C V B N M'.split(' '), 'Backspace'],
+	];
+	const keyboard = document.createElement('div');
+	keyboard.className = 'wordle-keyboard';
+	keys.forEach((keyRow) => {
+		const rowEl = document.createElement('div');
+		rowEl.className = 'keyboard-row';
+		keyRow.forEach((key) => {
+			const btn = document.createElement('button');
+			btn.type = 'button';
+			btn.className = 'keyboard-key';
+			if (key === 'Enter') btn.className += ' key-enter';
+			if (key === 'Backspace') btn.className += ' key-backspace';
+			btn.textContent = key === 'Backspace' ? '⌫' : key;
+			btn.addEventListener('click', () => handleKey(key));
+			rowEl.appendChild(btn);
+		});
+		keyboard.appendChild(rowEl);
+	});
+	app.appendChild(keyboard);
+
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Enter' || e.key === 'Backspace') { e.preventDefault(); handleKey(e.key); }
+		else if (e.key.length === 1 && /^[A-Za-z]$/.test(e.key)) { e.preventDefault(); handleKey(e.key.toUpperCase()); }
+	}, { signal });
+
+	// Fetch starting word if needed
+	if (!startWord) {
+		(async () => {
+			const res = await fetch('/api/chain/start');
+			if (signal?.aborted) return;
+			const data = await res.json();
+			if (data.word) {
+				startWord = data.word;
+				save();
+				renderChainDisplay();
+				updateInputDisplay();
+				updateTimerDisplay();
+				if (!finished && chain.length < CHAIN_LENGTH) {
+					setMsg(`Chain starts with "${startWord.toUpperCase()}". Next word starts with "${requiredLetter()}"!`, false);
+					startTimer();
+				}
+			}
+		})();
+	} else {
+		renderChainDisplay();
+		updateInputDisplay();
+		updateTimerDisplay();
+		if (!finished && chain.length < CHAIN_LENGTH) {
+			setMsg(`Next word starts with "${requiredLetter()}"`, false);
+			startTimer();
+		} else if (finished && chain.length >= CHAIN_LENGTH) {
+			setMsg('Chain complete! 🔗🔥', false);
+		}
+	}
+
+	updateTimerDisplay();
+}
+
+// ---- Wordle 5 (stages 2, 5) ----
 
 function renderWordle5(
 	app: HTMLDivElement,
-	stage: 2 | 4 | 5,
+	stage: 2 | 5,
 	onWin: (solvedWord?: string) => void,
 	onGameOver: () => void,
 	initialStage?: Stage2Or3Data | null,
@@ -598,7 +1003,7 @@ function renderWordle5(
 	app.appendChild(keyboard);
 
 	// Check if we need to submit the carried-over word from previous stage
-	const shouldAutoSubmitPrefill = stage === 2;
+	const shouldAutoSubmitPrefill = stage === 2 || stage === 5;
 	// This should happen if:
 	// 1. No completed rows yet, OR
 	// 2. First row exists but doesn't match the previous stage's word, OR
@@ -1232,7 +1637,7 @@ type Progress = {
 	stage1?: Stage1Data;
 	stage2?: Stage2Or3Data;
 	stage3?: Stage3Data;
-	stage4?: Stage2Or3Data;
+	stage4?: Stage4ChainData;
 	stage5?: Stage2Or3Data;
 	stage6?: Stage2Or3Data;
 	stage7?: Stage7Data;
@@ -1279,8 +1684,8 @@ function computeDailyScore(progress: Progress): number {
 	if (progress.solvedWord3?.length === WORD_LENGTH) {
 		score += WORD_LENGTH;
 	}
-	if (progress.stage4?.completedRows?.length) {
-		score += progress.stage4.completedRows.length * WORD_LENGTH;
+	if (progress.stage4?.chain?.length) {
+		score += progress.stage4.chain.length * WORD_LENGTH;
 	}
 	if (progress.stage5?.completedRows?.length) {
 		score += progress.stage5.completedRows.length * WORD_LENGTH;
@@ -1370,8 +1775,31 @@ function renderGame(app: HTMLDivElement, initial: Progress | null = null): void 
 		} else {
 			mergeSave({ stage: next });
 		}
-		progressState.stage = next;
-		reRender();
+
+		// Show fiery inter-stage congrats for 3 seconds, then advance
+		if (renderAbort) renderAbort.abort();
+		renderAbort = new AbortController();
+		const congratsSignal = renderAbort.signal;
+
+		// Keep the completed circle's theme during congrats
+		app.innerHTML = '';
+
+		// Keep debug reset accessible during congrats
+		const resetBtn = document.createElement('button');
+		resetBtn.type = 'button';
+		resetBtn.className = 'debug-reset-btn';
+		resetBtn.textContent = '⟳ Reset';
+		resetBtn.addEventListener('click', () => onReset());
+		app.appendChild(resetBtn);
+
+		renderStageCongrats(app, currentStage, next, congratsSignal, () => {
+			progressState.stage = next;
+			// Transition to next circle's theme
+			const circle = String(next);
+			app.setAttribute('data-circle', circle);
+			document.body.setAttribute('data-circle', circle);
+			reRender();
+		});
 	}
 
 	async function doGameOver(): Promise<void> {
@@ -1437,17 +1865,27 @@ function renderGame(app: HTMLDivElement, initial: Progress | null = null): void 
 		app.setAttribute('data-circle', circle);
 		document.body.setAttribute('data-circle', circle);
 		app.innerHTML = '';
-		// Render flame icons based on the current stage (1..7)
-		const flames = document.createElement('div');
-		flames.className = 'flames';
-		const count = Math.max(1, Math.min(7, progressState.stage));
-		for (let i = 0; i < count; i++) {
-			const img = document.createElement('img');
-			img.src = '/src/assets/flame.svg';
-			img.alt = 'flame';
-			flames.appendChild(img);
+		// Render cute flame doodles building up from the bottom — more each stage
+		const flameContainer = document.createElement('div');
+		flameContainer.className = 'flame-doodles';
+		const stage = progressState.stage;
+		// Number of flame doodles scales with stage: 3, 5, 8, 12, 16, 22, 30
+		const flameCounts = [0, 3, 5, 8, 12, 16, 22, 30];
+		const numFlames = flameCounts[Math.min(stage, 7)] ?? 3;
+		const flameEmojis = ['🔥', '🕯️', '✨', '🔥', '🕯️'];
+		for (let i = 0; i < numFlames; i++) {
+			const flame = document.createElement('span');
+			flame.className = 'flame-doodle';
+			flame.textContent = flameEmojis[i % flameEmojis.length];
+			// Distribute across the bottom, with some randomness
+			const left = (i / numFlames) * 90 + Math.random() * 10;
+			const bottomOffset = Math.random() * (stage * 6); // Higher stages = flames creep higher
+			const size = 0.8 + Math.random() * 0.8;
+			const delay = Math.random() * 2;
+			flame.style.cssText = `left:${left}%;bottom:${bottomOffset}px;font-size:${size}rem;animation-delay:${delay}s;`;
+			flameContainer.appendChild(flame);
 		}
-		app.appendChild(flames);
+		app.appendChild(flameContainer);
 
 		// Always-visible reset button for testing
 		const resetBtn = document.createElement('button');
@@ -1462,7 +1900,7 @@ function renderGame(app: HTMLDivElement, initial: Progress | null = null): void 
 		if (progressState.stage === 1) return renderHangman(app, goToNextStage, doGameOver, progressState.stage1, (d) => mergeSave({ stage1: d }), renderSignal);
 		if (progressState.stage === 2) return renderWordle5(app, 2, goToNextStage, doGameOver, progressState.stage2, progressState.solvedWord1, (d) => mergeSave({ stage2: d }), renderSignal);
 		if (progressState.stage === 3) return renderAnagram(app, goToNextStage, doGameOver, progressState.stage3, (d) => mergeSave({ stage3: d }), renderSignal);
-		if (progressState.stage === 4) return renderWordle5(app, 4, goToNextStage, doGameOver, progressState.stage4, progressState.solvedWord3, (d) => mergeSave({ stage4: d }), renderSignal);
+		if (progressState.stage === 4) return renderWordChain(app, goToNextStage, doGameOver, progressState.stage4, (d) => mergeSave({ stage4: d }), renderSignal);
 		if (progressState.stage === 5) return renderWordle5(app, 5, goToNextStage, doGameOver, progressState.stage5, progressState.solvedWord4, (d) => mergeSave({ stage5: d }), renderSignal);
 		if (progressState.stage === 6) return renderWordle6(app, goToNextStage, doGameOver, progressState.stage6, (d) => mergeSave({ stage6: d }), renderSignal);
 		if (progressState.stage === 7) return renderWordle7(app, doVictory, doGameOver, progressState.stage7, progressState.solvedWord6, (d) => mergeSave({ stage7: d }), renderSignal);
