@@ -364,70 +364,49 @@ app.post('/api/report-score', async (req: Request, res: Response) => {
 	} else {
 		content = `🕯️ **7 Circles of Wordle** — **${displayName}** wandered away at ${stageName}.\n${scoreLine}`;
 	}
-	// Helper: send a message to a specific channel
-	async function sendToChannel(targetChannelId: string): Promise<globalThis.Response> {
+	// Helper: send a message to a channel with a given auth header
+	async function sendToChannel(targetChannelId: string, msg: string, authHeader: string): Promise<globalThis.Response> {
 		return fetch(`https://discord.com/api/v10/channels/${targetChannelId}/messages`, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
-				Authorization: `Bot ${botToken}`,
+				Authorization: authHeader,
 			},
-			body: JSON.stringify({ content }),
+			body: JSON.stringify({ content: msg }),
 		});
 	}
 
-	// Helper: open/create a DM channel with the user, returns the DM channel ID
-	async function openDmChannel(targetUserId: string): Promise<string | null> {
-		try {
-			const dmRes = await fetch('https://discord.com/api/v10/users/@me/channels', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					Authorization: `Bot ${botToken}`,
-				},
-				body: JSON.stringify({ recipient_id: targetUserId }),
-			});
-			if (!dmRes.ok) {
-				console.warn('[report-score] Failed to open DM channel:', dmRes.status, await dmRes.text());
-				return null;
-			}
-			const dmData = await dmRes.json() as { id: string };
-			return dmData.id;
-		} catch (e) {
-			console.warn('[report-score] Error opening DM channel:', e);
-			return null;
-		}
-	}
+	// Extract user's Bearer token from the request
+	const userBearerToken = req.headers.authorization?.startsWith('Bearer ')
+		? req.headers.authorization.slice(7)
+		: null;
 
 	try {
-		// First try sending to the provided channelId (works for guild text channels)
-		let discordRes = await sendToChannel(channelId);
+		// First try with Bot token (works for guild text channels where bot has Send Messages)
+		const botRes = await sendToChannel(channelId, content, `Bot ${botToken}`);
+		if (botRes.ok) {
+			res.json({ ok: true });
+			return;
+		}
 
-		// If it fails (e.g. voice channel from DM call), fall back to creating a DM channel
-		if (!discordRes.ok) {
-			const errStatus = discordRes.status;
-			const errBody = await discordRes.text();
-			console.warn(`[report-score] Channel ${channelId} failed (${errStatus}), trying DM fallback for user ${userId}…`);
+		const errStatus = botRes.status;
+		const errBody = await botRes.text();
+		console.warn(`[report-score] Bot send to ${channelId} failed (${errStatus}: ${errBody})`);
 
-			const dmChannelId = await openDmChannel(userId);
-			if (dmChannelId && dmChannelId !== channelId) {
-				discordRes = await sendToChannel(dmChannelId);
-				if (!discordRes.ok) {
-					const dmErr = await discordRes.text();
-					console.warn('[report-score] DM fallback also failed:', discordRes.status, dmErr);
-					res.status(502).json({ error: 'Failed to send message' });
-					return;
-				}
-				console.log(`[report-score] Sent via DM channel ${dmChannelId} (fallback)`);
-				res.json({ ok: true, fallback: 'dm' });
-				return;
-			} else {
-				console.warn('[report-score] Could not open DM channel. Original error:', errStatus, errBody);
-				res.status(502).json({ error: 'Failed to send message to channel' });
+		// Fallback: use the user's OAuth Bearer token (works for DM channels the user is in)
+		if (userBearerToken) {
+			console.log(`[report-score] Trying user Bearer token for channel ${channelId}…`);
+			const userRes = await sendToChannel(channelId, content, `Bearer ${userBearerToken}`);
+			if (userRes.ok) {
+				console.log(`[report-score] Sent via user Bearer token to ${channelId}`);
+				res.json({ ok: true, method: 'bearer' });
 				return;
 			}
+			const userErr = await userRes.text();
+			console.warn(`[report-score] User Bearer send also failed (${userRes.status}: ${userErr})`);
 		}
-		res.json({ ok: true });
+
+		res.status(502).json({ error: 'Failed to send message to channel' });
 	} catch (e) {
 		console.warn('[report-score]', e);
 		res.status(500).json({ error: 'Failed to report score' });

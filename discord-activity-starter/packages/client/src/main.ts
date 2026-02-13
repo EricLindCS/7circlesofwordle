@@ -108,7 +108,7 @@ async function setupDiscordSdk(): Promise<void> {
 		response_type: 'code',
 		state: '',
 		prompt: 'none',
-		scope: ['identify', 'guilds', 'applications.commands'],
+		scope: ['identify', 'guilds', 'applications.commands', 'dm_channels.messages.write' as any],
 	});
 	const response = await fetch('/api/token', {
 		method: 'POST',
