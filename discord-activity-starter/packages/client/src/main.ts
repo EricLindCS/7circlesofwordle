@@ -13,15 +13,33 @@ const MAX_WRONG_HANGMAN = 6;
 const FEEDBACK = { absent: 0, present: 1, correct: 2 } as const;
 const FLIP_DELAY_MS = 120;
 
-const CIRCLE_NAMES: Record<number, string> = {
-	1: 'Circle 1: Hangman',
-	2: 'Circle 2: Wordle',
-	3: 'Circle 3: Anagrams',
-	4: 'Circle 4: Chains',
-	5: 'Circle 5: Totally Normal Wordle',
-	6: 'Circle 6: Big Wordle',
-	7: 'Circle 7: Evil Wordle',
+const CIRCLE_NAMES: Record<number, { label: string; name: string }> = {
+	1: { label: 'Circle 1', name: 'Hangman' },
+	2: { label: 'Circle 2', name: 'Wordle' },
+	3: { label: 'Circle 3', name: 'Anagrams' },
+	4: { label: 'Circle 4', name: 'Chains ;)' },
+	5: { label: 'Circle 5', name: 'Totally Normal Wordle' },
+	6: { label: 'Circle 6', name: 'Big Wordle' },
+	7: { label: 'Circle 7', name: 'Evil Wordle' },
 };
+
+function setStageTitle(el: HTMLElement, stage: number): void {
+	const info = CIRCLE_NAMES[stage];
+	if (!info) { el.textContent = `Circle ${stage}`; return; }
+	el.innerHTML = '';
+	const labelSpan = document.createElement('span');
+	labelSpan.className = 'title-label';
+	labelSpan.textContent = info.label;
+	const nameSpan = document.createElement('span');
+	nameSpan.className = 'title-name';
+	nameSpan.textContent = info.name;
+	const separator = document.createElement('span');
+	separator.className = 'title-separator';
+	separator.textContent = '·';
+	el.appendChild(labelSpan);
+	el.appendChild(separator);
+	el.appendChild(nameSpan);
+}
 
 type CellState = { letter: string; feedback: typeof FEEDBACK[keyof typeof FEEDBACK] | null };
 
@@ -58,19 +76,17 @@ async function setupDiscordSdk(): Promise<void> {
 
 // ---- Game over & victory ----
 
-function renderGameOver(app: HTMLDivElement, onReset: (() => void) | null): void {
+function renderGameOver(app: HTMLDivElement): void {
 	app.innerHTML = `
 		<div class="screen screen-gameover">
-			<div style="font-size:3.5rem;margin-bottom:0.5rem">�🕯️</div>
+			<div style="font-size:3.5rem;margin-bottom:0.5rem">🕯️ :(((</div>
 			<h1 class="screen-title">Oh no!</h1>
-			<p class="screen-text">The flame flickers out… try again tomorrow!</p>
-			${onReset ? '<button type="button" class="reset-btn">Reset my progress (testing)</button>' : ''}
+			<p class="screen-text">The flame of passion flickers out… try again tomorrow</p>
 		</div>
 	`;
-	if (onReset) app.querySelector('.reset-btn')?.addEventListener('click', onReset);
 }
 
-function renderVictory(app: HTMLDivElement, onReset: (() => void) | null): void {
+function renderVictory(app: HTMLDivElement): void {
 	// Create sparkle particles
 	let sparklesHtml = '';
 	for (let i = 0; i < 20; i++) {
@@ -86,10 +102,8 @@ function renderVictory(app: HTMLDivElement, onReset: (() => void) | null): void 
 			<div style="font-size:4rem;margin-bottom:0.5rem">🎉🔥🎉</div>
 			<h1 class="screen-title">All Seven Circles Complete!</h1>
 			<p class="screen-text">You did it!! Every circle cleared 🥳<br>See you tomorrow for a new challenge ✨</p>
-			${onReset ? '<button type="button" class="reset-btn">Reset my progress (testing)</button>' : ''}
 		</div>
 	`;
-	if (onReset) app.querySelector('.reset-btn')?.addEventListener('click', onReset);
 }
 
 /** Cute inter-stage congratulations screen. Shows for 3s then calls onDone. */
@@ -100,14 +114,15 @@ function renderStageCongrats(
 	signal: AbortSignal,
 	onDone: () => void
 ): void {
-	const nextLabel = CIRCLE_NAMES[nextCircle] ?? `Circle ${nextCircle}`;
+	const nextInfo = CIRCLE_NAMES[nextCircle];
+	const nextLabel = nextInfo ? `${nextInfo.label} · ${nextInfo.name}` : `Circle ${nextCircle}`;
 	// Teasing per-stage messages that get progressively more cheeky
 	const stageMessages: Record<number, string> = {
 		1: 'Aww, you\'re doing great 🥺',
-		2: 'Okay smarty-pants… �',
-		3: 'You\'re so smart!! …for now 💅',
-		4: 'Wow you\'re actually good at this 😳',
-		5: 'You won\'t last much longer 🫣',
+		2: 'Okay smarty-pants…',
+		3: 'You\'re doing so well!! …for now ',
+		4: 'Wow you\'re actually kinda good at this 😳',
+		5: 'You won\'t last much longer ;)',
 		6: 'Wait, you\'re still going?? �',
 	};
 	const cheer = stageMessages[completedCircle] ?? 'Not bad… 👀';
@@ -220,7 +235,7 @@ function renderHangman(
 	app.innerHTML = '';
 	const title = document.createElement('h1');
 	title.className = 'wordle-title';
-	title.textContent = CIRCLE_NAMES[1];
+	setStageTitle(title, 1);
 	app.appendChild(title);
 
 	const wordDiv = document.createElement('div');
@@ -371,7 +386,7 @@ function renderAnagram(
 
 	const title = document.createElement('h1');
 	title.className = 'wordle-title';
-	title.textContent = CIRCLE_NAMES[3];
+	setStageTitle(title, 3);
 
 	const lettersDiv = document.createElement('div');
 	lettersDiv.className = 'anagram-letters';
@@ -667,7 +682,7 @@ function renderWordChain(
 	app.innerHTML = '';
 	const title = document.createElement('h1');
 	title.className = 'wordle-title';
-	title.textContent = CIRCLE_NAMES[4];
+	setStageTitle(title, 4);
 	app.appendChild(title);
 
 	const subtitle = document.createElement('p');
@@ -994,7 +1009,7 @@ function renderWordle5(
 
 	const title = document.createElement('h1');
 	title.className = 'wordle-title';
-	title.textContent = CIRCLE_NAMES[stage];
+	setStageTitle(title, stage);
 
 	app.innerHTML = '';
 	app.appendChild(title);
@@ -1324,7 +1339,7 @@ function renderWordle6(
 
 	const title = document.createElement('h1');
 	title.className = 'wordle-title';
-	title.textContent = CIRCLE_NAMES[6];
+	setStageTitle(title, 6);
 
 	app.innerHTML = '';
 	app.appendChild(title);
@@ -1556,7 +1571,7 @@ function renderWordle7(
 
 	const title = document.createElement('h1');
 	title.className = 'wordle-title';
-	title.textContent = CIRCLE_NAMES[7];
+	setStageTitle(title, 7);
 
 	app.innerHTML = '';
 	app.appendChild(title);
@@ -1717,12 +1732,6 @@ async function reportScore(payload: {
 	});
 }
 
-async function resetProgress(): Promise<void> {
-	const headers = getAuthHeaders();
-	if (!headers) return;
-	await fetch('/api/reset', { method: 'POST', headers });
-}
-
 function renderGame(app: HTMLDivElement, initial: Progress | null = null): void {
 	const progressState: Progress = {
 		stage: Math.min(7, Math.max(1, Number(initial?.stage) || 1)),
@@ -1742,7 +1751,6 @@ function renderGame(app: HTMLDivElement, initial: Progress | null = null): void 
 		solvedWord5: initial?.solvedWord5,
 		solvedWord6: initial?.solvedWord6,
 	};
-	const canReset = !!getAuthHeaders();
 
 	function mergeSave(patch: Partial<Progress>): void {
 		Object.assign(progressState, patch);
@@ -1784,14 +1792,6 @@ function renderGame(app: HTMLDivElement, initial: Progress | null = null): void 
 		// Keep the completed circle's theme during congrats
 		app.innerHTML = '';
 
-		// Keep debug reset accessible during congrats
-		const resetBtn = document.createElement('button');
-		resetBtn.type = 'button';
-		resetBtn.className = 'debug-reset-btn';
-		resetBtn.textContent = '⟳ Reset';
-		resetBtn.addEventListener('click', () => onReset());
-		app.appendChild(resetBtn);
-
 		renderStageCongrats(app, currentStage, next, congratsSignal, () => {
 			progressState.stage = next;
 			// Transition to next circle's theme
@@ -1827,27 +1827,6 @@ function renderGame(app: HTMLDivElement, initial: Progress | null = null): void 
 			dailyScore: computeDailyScore(progressState),
 			username: undefined,
 		}).catch(() => {});
-		reRender();
-	}
-
-	async function onReset(): Promise<void> {
-		await resetProgress();
-		progressState.stage = 1;
-		progressState.gameOver = false;
-		progressState.victory = false;
-		progressState.stage1 = undefined;
-		progressState.stage2 = undefined;
-		progressState.stage3 = undefined;
-		progressState.stage4 = undefined;
-		progressState.stage5 = undefined;
-		progressState.stage6 = undefined;
-		progressState.stage7 = undefined;
-		progressState.solvedWord1 = undefined;
-		progressState.solvedWord2 = undefined;
-		progressState.solvedWord3 = undefined;
-		progressState.solvedWord4 = undefined;
-		progressState.solvedWord5 = undefined;
-		progressState.solvedWord6 = undefined;
 		reRender();
 	}
 
@@ -1887,16 +1866,8 @@ function renderGame(app: HTMLDivElement, initial: Progress | null = null): void 
 		}
 		app.appendChild(flameContainer);
 
-		// Always-visible reset button for testing
-		const resetBtn = document.createElement('button');
-		resetBtn.type = 'button';
-		resetBtn.className = 'debug-reset-btn';
-		resetBtn.textContent = '⟳ Reset';
-		resetBtn.addEventListener('click', () => onReset());
-		app.appendChild(resetBtn);
-
-		if (progressState.gameOver) return renderGameOver(app, canReset ? onReset : null);
-		if (progressState.victory) return renderVictory(app, canReset ? onReset : null);
+		if (progressState.gameOver) return renderGameOver(app);
+		if (progressState.victory) return renderVictory(app);
 		if (progressState.stage === 1) return renderHangman(app, goToNextStage, doGameOver, progressState.stage1, (d) => mergeSave({ stage1: d }), renderSignal);
 		if (progressState.stage === 2) return renderWordle5(app, 2, goToNextStage, doGameOver, progressState.stage2, progressState.solvedWord1, (d) => mergeSave({ stage2: d }), renderSignal);
 		if (progressState.stage === 3) return renderAnagram(app, goToNextStage, doGameOver, progressState.stage3, (d) => mergeSave({ stage3: d }), renderSignal);

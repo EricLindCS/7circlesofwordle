@@ -189,7 +189,7 @@ app.post('/api/report-score', async (req: Request, res: Response) => {
 		1: 'Circle 1 (Hangman)',
 		2: 'Circle 2 (Wordle)',
 		3: 'Circle 3 (Anagrams)',
-		4: 'Circle 4 (Chains)',
+		4: 'Circle 4 (Chains ;))',
 		5: 'Circle 5 (Totally Normal Wordle)',
 		6: 'Circle 6 (Big Wordle)',
 		7: 'Circle 7 (Evil Wordle)',
