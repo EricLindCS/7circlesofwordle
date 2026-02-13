@@ -119,7 +119,30 @@ function shuffleWord(word: string): string {
 
 export function getAnagramLettersStage3(): string {
 	const word = getTodayWordStage3();
-	return shuffleWord(word);
+	// Add one decoy letter not in the word, then shuffle all 6
+	const seed = seedForStage(3);
+	const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+	const wordLetters = new Set(word.split(''));
+	// Pick a decoy letter deterministically that's NOT in the word
+	let decoy = '';
+	for (let i = 0; i < 26; i++) {
+		const candidate = alphabet[(seed + i * 7) % 26];
+		if (!wordLetters.has(candidate)) { decoy = candidate; break; }
+	}
+	const allLetters = (word + decoy).split('');
+	// Shuffle all 6 letters deterministically
+	for (let i = allLetters.length - 1; i > 0; i--) {
+		const j = (seed + i * 31) % (i + 1);
+		[allLetters[i], allLetters[j]] = [allLetters[j], allLetters[i]];
+	}
+	return allLetters.join('').toUpperCase();
+}
+
+/** Return the correct letter at position `pos` (0-based) of today's anagram secret. */
+export function getAnagramHint(pos: number): { position: number; letter: string } | { error: string } {
+	const word = getTodayWordStage3();
+	if (pos < 0 || pos >= word.length) return { error: 'Invalid position' };
+	return { position: pos, letter: word[pos].toUpperCase() };
 }
 
 export function validateAnagramStage3(guess: string): { won: boolean } | { error: string } {

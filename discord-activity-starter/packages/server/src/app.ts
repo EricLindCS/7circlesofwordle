@@ -18,6 +18,7 @@ import {
 	hangmanGuessLetter,
 	hangmanGuessWord,
 	getAnagramLettersStage3,
+	getAnagramHint,
 	validateAnagramStage3,
 	validateChainWord,
 	validateGuessStage2,
@@ -417,6 +418,16 @@ app.get('/api/anagram/letters', (_req: Request, res: Response) => {
 app.post('/api/anagram/guess', (req: Request, res: Response) => {
 	const { guess } = req.body ?? {};
 	const result = validateAnagramStage3(String(guess ?? ''));
+	if ('error' in result) {
+		res.status(400).json({ error: result.error });
+		return;
+	}
+	res.json(result);
+});
+
+app.get('/api/anagram/hint/:pos', (req: Request, res: Response) => {
+	const pos = Number(req.params.pos);
+	const result = getAnagramHint(pos);
 	if ('error' in result) {
 		res.status(400).json({ error: result.error });
 		return;

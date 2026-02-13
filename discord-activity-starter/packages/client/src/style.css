@@ -339,10 +339,6 @@ body {
 		font-size: 1.5rem;
 		letter-spacing: 0.2em;
 	}
-	.anagram-input {
-		font-size: 1.2rem;
-		min-height: 44px;
-	}
 }
 /* Prevent double-tap zoom on buttons */
 button {
@@ -617,34 +613,127 @@ button {
 	margin-bottom: 1rem;
 }
 
-/* Stage 3: Unscramble (Anagram) */
-.anagram-letters {
+/* Stage 3: Anagram — 6 tiles, 1 fake, timed reveals */
+.anagram-timer {
 	font-size: 2rem;
-	letter-spacing: 0.4em;
 	font-weight: 700;
-	margin: 1rem 0 0.5rem;
-	text-transform: uppercase;
+	font-variant-numeric: tabular-nums;
+	letter-spacing: 0.05em;
+	color: var(--wordle-text);
+	margin-bottom: 0.5rem;
+}
+
+.anagram-timer-urgent {
+	color: #c53030;
+	animation: timer-pulse 0.6s ease-in-out infinite alternate;
 }
 
 .anagram-label {
 	font-size: 0.9rem;
 	color: var(--wordle-text-muted);
-	margin: 0.5rem 0 0.25rem;
+	margin: 0.25rem 0 0.75rem;
 }
 
-.anagram-input {
-	display: block;
-	margin: 0.5rem auto 0.25rem;
-	padding: 0.5rem 0.75rem;
-	font-size: 1.1rem;
+/* Source letter tiles (6 scrambled) */
+.anagram-source-tiles {
+	display: flex;
+	gap: 0.5rem;
+	justify-content: center;
+	margin-bottom: 1.25rem;
+	flex-wrap: wrap;
+}
+
+.anagram-tile {
+	width: 3rem;
+	height: 3rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 1.4rem;
+	font-weight: 700;
 	text-transform: uppercase;
-	letter-spacing: 0.1em;
-	max-width: 12rem;
-	text-align: center;
-	border: 2px solid var(--wordle-border);
-	border-radius: 4px;
+	border: 2px solid var(--wordle-border-filled);
+	border-radius: 10px;
 	background: var(--wordle-cell-bg);
 	color: var(--wordle-text);
+	cursor: pointer;
+	transition: transform 0.15s, opacity 0.2s, border-color 0.2s, box-shadow 0.2s;
+	box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+	user-select: none;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.anagram-tile:hover:not(.anagram-tile-used) {
+	transform: translateY(-3px);
+	box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+	border-color: var(--circle-accent, #e8a84c);
+}
+
+.anagram-tile:active:not(.anagram-tile-used) {
+	transform: scale(0.95);
+}
+
+.anagram-tile-used {
+	opacity: 0.25;
+	transform: scale(0.9);
+	cursor: default;
+	border-color: var(--wordle-border);
+	box-shadow: none;
+}
+
+/* Answer slots (5 target positions) */
+.anagram-answer-slots {
+	display: flex;
+	gap: 0.4rem;
+	justify-content: center;
+	margin-bottom: 1rem;
+}
+
+.anagram-slot {
+	width: 3rem;
+	height: 3rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 1.4rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	border: 2px dashed var(--wordle-border);
+	border-radius: 8px;
+	background: transparent;
+	color: var(--wordle-text);
+	cursor: pointer;
+	transition: all 0.2s ease;
+	user-select: none;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.anagram-slot-filled {
+	border-style: solid;
+	border-color: var(--wordle-border-filled);
+	background: var(--wordle-cell-bg);
+	animation: anagram-slot-pop 0.2s ease-out;
+}
+
+@keyframes anagram-slot-pop {
+	0%   { transform: scale(0.8); }
+	60%  { transform: scale(1.08); }
+	100% { transform: scale(1); }
+}
+
+.anagram-slot-revealed {
+	border-color: var(--wordle-correct) !important;
+	border-style: solid !important;
+	background: color-mix(in srgb, var(--wordle-correct) 15%, var(--wordle-cell-bg)) !important;
+	color: var(--wordle-correct);
+	cursor: default;
+	animation: anagram-reveal-flash 0.5s ease-out;
+	box-shadow: 0 0 12px color-mix(in srgb, var(--wordle-correct) 30%, transparent);
+}
+
+@keyframes anagram-reveal-flash {
+	0%   { transform: scale(1.3); box-shadow: 0 0 20px color-mix(in srgb, var(--wordle-correct) 50%, transparent); }
+	100% { transform: scale(1); box-shadow: 0 0 12px color-mix(in srgb, var(--wordle-correct) 30%, transparent); }
 }
 
 .anagram-message {
@@ -655,10 +744,19 @@ button {
 
 .anagram-message.error {
 	color: #c53030;
+	font-weight: 600;
 }
 
 .anagram-submit {
 	margin-top: 0.5rem;
+}
+
+@media (max-width: 480px) {
+	.anagram-tile, .anagram-slot {
+		width: 2.6rem;
+		height: 2.6rem;
+		font-size: 1.2rem;
+	}
 }
 
 /* Game over / Victory / Stage Congrats */

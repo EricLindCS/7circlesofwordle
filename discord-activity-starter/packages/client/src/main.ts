@@ -380,16 +380,131 @@ function renderAnagram(
 	onGameOver: () => void,
 	initialStage3?: Stage3Data | null,
 	onSaveStage3?: (data: Stage3Data) => void,
-	_signal?: AbortSignal
+	signal?: AbortSignal
 ): void {
 	let letters = initialStage3?.letters ?? '';
 	let submitted = false;
+	let timeLeft = 60;
+	let timerHandle: ReturnType<typeof setInterval> | null = null;
+
+	// Answer slots: 5 positions, some may be revealed (locked)
+	const answerSlots: (string | null)[] = Array(WORD_LENGTH).fill(null);
+	const revealedPositions = new Set<number>();
+	// Track which source tile index each answer slot came from (for un-tapping)
+	const slotSources: (number | null)[] = Array(WORD_LENGTH).fill(null);
+	// Track which source tiles are "used" (placed into answer)
+	const usedSourceTiles = new Set<number>();
+	// Hint positions to reveal at 15s intervals: positions 0, 1, 2
+	const hintSchedule = [
+		{ atTime: 45, pos: 0 },
+		{ atTime: 30, pos: 1 },
+		{ atTime: 15, pos: 2 },
+	];
 
 	function setMsg(text: string, isError = false): void {
 		const el = app.querySelector('.anagram-message');
 		if (el) {
 			el.textContent = text;
 			el.className = 'anagram-message' + (isError ? ' error' : '');
+		}
+	}
+
+	function updateTimerDisplay(): void {
+		const timerEl = app.querySelector('.anagram-timer');
+		if (!timerEl) return;
+		timerEl.textContent = `${timeLeft}s`;
+		timerEl.className = 'anagram-timer' + (timeLeft <= 10 ? ' anagram-timer-urgent' : '');
+	}
+
+	function renderSourceTiles(): void {
+		const container = app.querySelector('.anagram-source-tiles');
+		if (!container) return;
+		const allTiles = container.querySelectorAll<HTMLElement>('.anagram-tile');
+		allTiles.forEach((tile, i) => {
+			tile.classList.toggle('anagram-tile-used', usedSourceTiles.has(i));
+		});
+	}
+
+	function renderAnswerSlots(): void {
+		const container = app.querySelector('.anagram-answer-slots');
+		if (!container) return;
+		const slots = container.querySelectorAll<HTMLElement>('.anagram-slot');
+		slots.forEach((slot, i) => {
+			const letter = answerSlots[i];
+			slot.textContent = letter ?? '';
+			slot.classList.toggle('anagram-slot-filled', letter !== null);
+			slot.classList.toggle('anagram-slot-revealed', revealedPositions.has(i));
+		});
+	}
+
+	function placeLetterInNextSlot(sourceTileIndex: number, letter: string): void {
+		// Find the first empty non-revealed slot
+		for (let i = 0; i < WORD_LENGTH; i++) {
+			if (answerSlots[i] === null && !revealedPositions.has(i)) {
+				answerSlots[i] = letter;
+				slotSources[i] = sourceTileIndex;
+				usedSourceTiles.add(sourceTileIndex);
+				renderSourceTiles();
+				renderAnswerSlots();
+				return;
+			}
+		}
+	}
+
+	function removeLetterFromSlot(slotIndex: number): void {
+		if (revealedPositions.has(slotIndex)) return; // can't remove revealed
+		const sourceIdx = slotSources[slotIndex];
+		answerSlots[slotIndex] = null;
+		slotSources[slotIndex] = null;
+		if (sourceIdx !== null) {
+			usedSourceTiles.delete(sourceIdx);
+		}
+		renderSourceTiles();
+		renderAnswerSlots();
+	}
+
+	async function revealHint(pos: number): Promise<void> {
+		if (revealedPositions.has(pos) || submitted) return;
+		try {
+			const res = await fetch(`/api/anagram/hint/${pos}`);
+			const data = await res.json();
+			if (res.ok && data.letter) {
+				// If a player-placed letter is in this slot, remove it back to source
+				if (answerSlots[pos] !== null) {
+					const sourceIdx = slotSources[pos];
+					if (sourceIdx !== null) usedSourceTiles.delete(sourceIdx);
+					slotSources[pos] = null;
+				}
+				answerSlots[pos] = data.letter;
+				revealedPositions.add(pos);
+				renderAnswerSlots();
+				renderSourceTiles();
+			}
+		} catch {}
+	}
+
+	async function submitGuess(): Promise<void> {
+		const guess = answerSlots.join('');
+		if (guess.length !== WORD_LENGTH || answerSlots.includes(null) || submitted) return;
+		submitted = true;
+		if (timerHandle) clearInterval(timerHandle);
+		setMsg('');
+		const res = await fetch('/api/anagram/guess', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ guess: guess.toLowerCase() }),
+		});
+		const data = await res.json();
+		if (!res.ok) {
+			submitted = false;
+			setMsg(data.error ?? 'Invalid guess', true);
+			return;
+		}
+		if (data.won) {
+			onWin(guess.toLowerCase());
+		} else {
+			setMsg('Wrong word. Game over.', true);
+			onGameOver();
 		}
 	}
 
@@ -400,120 +515,100 @@ function renderAnagram(
 		if (res.ok && data.letters) {
 			letters = data.letters;
 			onSaveStage3?.({ letters });
-			const disp = app.querySelector('.anagram-letters');
-			if (disp) disp.textContent = letters.split('').join(' ');
 		}
 	}
 
-	async function submitGuess(): Promise<void> {
-		const input = app.querySelector<HTMLInputElement>('.anagram-input');
-		const guess = input?.value?.trim() ?? '';
-		if (!guess || guess.length !== WORD_LENGTH || submitted) return;
-		// Only one guess allowed for the anagram stage
-		submitted = true;
-		setMsg('');
-		const res = await fetch('/api/anagram/guess', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ guess: guess.toLowerCase() }),
-		});
-		const data = await res.json();
-		if (!res.ok) {
-			// Server rejected the guess (e.g. not in word list) — allow retry
-			submitted = false;
-			setMsg(data.error ?? 'Invalid guess', true);
-			return;
-		}
-		if (data.won) {
-			onWin(guess.toLowerCase());
-		} else {
-			// Wrong guess: player gets only one attempt for this stage — game over
-			setMsg('Wrong word. Game over.', true);
-			onGameOver();
-		}
-	}
+	function buildUI(): void {
+		app.innerHTML = '';
 
-	const title = document.createElement('h1');
-	title.className = 'wordle-title';
-	setStageTitle(title, 3);
+		const title = document.createElement('h1');
+		title.className = 'wordle-title';
+		setStageTitle(title, 3);
 
-	const lettersDiv = document.createElement('div');
-	lettersDiv.className = 'anagram-letters';
-	lettersDiv.textContent = letters ? letters.split('').join(' ') : '…';
+		const timerEl = document.createElement('div');
+		timerEl.className = 'anagram-timer';
+		timerEl.textContent = `${timeLeft}s`;
 
-	const label = document.createElement('div');
-	label.className = 'anagram-label';
-	label.textContent = 'Unscramble the letters into a 5-letter word:';
+		const label = document.createElement('div');
+		label.className = 'anagram-label';
+		label.textContent = 'Pick 5 of 6 letters — one is fake!';
 
-	const input = document.createElement('input');
-	input.type = 'text';
-	input.className = 'anagram-input';
-	input.placeholder = 'Type your guess';
-	input.maxLength = WORD_LENGTH;
-	input.autocomplete = 'off';
-
-	const msg = document.createElement('div');
-	msg.className = 'anagram-message';
-
-	const btn = document.createElement('button');
-	btn.type = 'button';
-	btn.className = 'reset-btn anagram-submit';
-	btn.textContent = 'Submit';
-	btn.addEventListener('click', () => submitGuess());
-
-	input.addEventListener('keydown', (e) => {
-		if (e.key === 'Enter') {
-			e.preventDefault();
-			submitGuess();
-		}
-	});
-
-	// On-screen keyboard for mobile
-	const keyRows = [
-		'Q W E R T Y U I O P'.split(' '),
-		'A S D F G H J K L'.split(' '),
-		['Enter', ...'Z X C V B N M'.split(' '), 'Backspace'],
-	];
-	const keyboard = document.createElement('div');
-	keyboard.className = 'wordle-keyboard';
-	keyRows.forEach((keyRow) => {
-		const rowEl = document.createElement('div');
-		rowEl.className = 'keyboard-row';
-		keyRow.forEach((key) => {
-			const kbtn = document.createElement('button');
-			kbtn.type = 'button';
-			kbtn.className = 'keyboard-key';
-			if (key === 'Enter') kbtn.className += ' key-enter';
-			if (key === 'Backspace') kbtn.className += ' key-backspace';
-			kbtn.textContent = key === 'Backspace' ? '⌫' : key;
-			kbtn.addEventListener('click', () => {
-				if (key === 'Enter') {
-					submitGuess();
-				} else if (key === 'Backspace') {
-					input.value = input.value.slice(0, -1);
-				} else if (input.value.length < WORD_LENGTH) {
-					input.value += key.toLowerCase();
-				}
+		// Source tiles (6 scrambled letters to tap)
+		const sourceTilesContainer = document.createElement('div');
+		sourceTilesContainer.className = 'anagram-source-tiles';
+		const letterArr = letters.split('');
+		letterArr.forEach((ch, i) => {
+			const tile = document.createElement('button');
+			tile.type = 'button';
+			tile.className = 'anagram-tile';
+			tile.textContent = ch.toUpperCase();
+			tile.addEventListener('click', () => {
+				if (submitted || usedSourceTiles.has(i)) return;
+				placeLetterInNextSlot(i, ch.toUpperCase());
 			});
-			rowEl.appendChild(kbtn);
+			sourceTilesContainer.appendChild(tile);
 		});
-		keyboard.appendChild(rowEl);
-	});
 
-	app.innerHTML = '';
-	app.appendChild(title);
-	app.appendChild(lettersDiv);
-	app.appendChild(label);
-	app.appendChild(input);
-	app.appendChild(msg);
-	app.appendChild(btn);
-	app.appendChild(keyboard);
-
-	fetchLetters().then(() => {
-		if (letters && lettersDiv.textContent === '…') {
-			lettersDiv.textContent = letters.split('').join(' ');
+		// Answer slots (5 positions)
+		const answerContainer = document.createElement('div');
+		answerContainer.className = 'anagram-answer-slots';
+		for (let i = 0; i < WORD_LENGTH; i++) {
+			const slot = document.createElement('div');
+			slot.className = 'anagram-slot';
+			slot.addEventListener('click', () => {
+				if (submitted) return;
+				removeLetterFromSlot(i);
+			});
+			answerContainer.appendChild(slot);
 		}
-	});
+
+		const msg = document.createElement('div');
+		msg.className = 'anagram-message';
+
+		const btn = document.createElement('button');
+		btn.type = 'button';
+		btn.className = 'reset-btn anagram-submit';
+		btn.textContent = 'Submit';
+		btn.addEventListener('click', () => submitGuess());
+
+		app.appendChild(title);
+		app.appendChild(timerEl);
+		app.appendChild(label);
+		app.appendChild(sourceTilesContainer);
+		app.appendChild(answerContainer);
+		app.appendChild(msg);
+		app.appendChild(btn);
+
+		// Start timer
+		timerHandle = setInterval(() => {
+			if (submitted) { if (timerHandle) clearInterval(timerHandle); return; }
+			timeLeft--;
+			updateTimerDisplay();
+
+			// Check hint reveals
+			for (const hint of hintSchedule) {
+				if (timeLeft === hint.atTime && !revealedPositions.has(hint.pos)) {
+					revealHint(hint.pos);
+				}
+			}
+
+			if (timeLeft <= 0) {
+				if (timerHandle) clearInterval(timerHandle);
+				if (!submitted) {
+					submitted = true;
+					setMsg('Time\'s up! Game over.', true);
+					onGameOver();
+				}
+			}
+		}, 1000);
+
+		// Clean up timer on abort (stage change)
+		signal?.addEventListener('abort', () => {
+			if (timerHandle) clearInterval(timerHandle);
+		});
+	}
+
+	fetchLetters().then(() => buildUI());
 }
 
 // ---- Stage 4: Word Chain ----
