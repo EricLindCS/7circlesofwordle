@@ -42,33 +42,43 @@ if (!BOT_TOKEN || !APPLICATION_ID) {
 
 // 401 usually means wrong token: use Bot token from Developer Portal → Your App → Bot → Token (not Client Secret)
 const url = `https://discord.com/api/v10/applications/${APPLICATION_ID}/commands`;
-const body = {
-	name: 'wordle-reset',
-	type: 1, // CHAT_INPUT = slash command
-	description: 'Reset your 7 Circles of Wordle progress for today.',
-};
 
-fetch(url, {
-	method: 'POST',
-	headers: {
-		'Content-Type': 'application/json',
-		Authorization: `Bot ${BOT_TOKEN}`,
+const commands = [
+	{
+		name: 'wordle-reset',
+		type: 1, // CHAT_INPUT = slash command
+		description: 'Reset your 7 Circles of Wordle progress for today.',
 	},
-	body: JSON.stringify(body),
-})
-	.then((r) => r.json())
-	.then((data) => {
+	{
+		name: 'wordle-leaderboard',
+		type: 1,
+		description: "See today's results and all-time scores for 7 Circles of Wordle.",
+	},
+];
+
+// Register each command individually (POST) to avoid removing the Entry Point command
+async function registerAll() {
+	for (const cmd of commands) {
+		const res = await fetch(url, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: `Bot ${BOT_TOKEN}`,
+			},
+			body: JSON.stringify(cmd),
+		});
+		const data = await res.json();
 		if (data.id) {
 			console.log('Slash command registered:', data.name, '(id:', data.id + ')');
 		} else {
-			console.error('Discord API error:', data);
+			console.error('Discord API error for', cmd.name + ':', data);
 			if (data.message && String(data.message).includes('401')) {
 				console.error('\n401 Unauthorized: Use the BOT token from Developer Portal → Your App → Bot → Token (copy or reset). Do not use the Client Secret.');
 			}
-			process.exit(1);
 		}
-	})
-	.catch((err) => {
+	}
+}
+registerAll().catch((err) => {
 		console.error(err);
 		process.exit(1);
 	});

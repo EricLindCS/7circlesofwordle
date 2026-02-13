@@ -88,6 +88,7 @@ app.post(
 			data?: { name?: string };
 			member?: { user?: { id?: string } };
 			user?: { id?: string };
+			channel_id?: string;
 		};
 		// Ping (type 1) — Discord requires ACK
 		if (body.type === 1) {
@@ -104,6 +105,71 @@ app.post(
 					content: 'Your progress for today has been reset. You can start from Stage 1 again.',
 					flags: 0,
 				},
+			});
+			return;
+		}
+		// /wordle-leaderboard — show today's results + all-time scores
+		if (body.type === 2 && body.data?.name === 'wordle-leaderboard') {
+			const channelId = body.channel_id;
+			const allEntries: { userId: string; entry: DailyUserEntry }[] = [];
+
+			// Gather today's entries — from the invoking channel if available, otherwise all channels
+			if (channelId && dailyChannelScores.has(channelId)) {
+				for (const [uid, entry] of dailyChannelScores.get(channelId)!) {
+					allEntries.push({ userId: uid, entry });
+				}
+			} else {
+				// Collect from all channels (dedup by userId, keep latest)
+				const seen = new Map<string, DailyUserEntry>();
+				for (const users of dailyChannelScores.values()) {
+					for (const [uid, entry] of users) {
+						seen.set(uid, entry);
+					}
+				}
+				for (const [uid, entry] of seen) {
+					allEntries.push({ userId: uid, entry });
+				}
+			}
+
+			// Build all-time leaderboard from totalScoreStore
+			const allTimeSorted = [...totalScoreStore.entries()]
+				.sort((a, b) => b[1] - a[1])
+				.slice(0, 15);
+
+			let content = '';
+
+			// Today's results
+			if (allEntries.length > 0) {
+				const todayLines = allEntries
+					.sort((a, b) => b.entry.dailyScore - a.entry.dailyScore)
+					.map((e, i) => {
+						const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '🔥';
+						const stageName = STAGE_NAMES[e.entry.stageReached] ?? `Circle ${e.entry.stageReached}`;
+						let status: string;
+						if (e.entry.victory) status = '✅ completed all circles';
+						else if (e.entry.gameOver) status = `💀 fell at ${stageName}`;
+						else status = `🚶 at ${stageName}`;
+						return `${medal} **${e.entry.username}** — ${status} · **${e.entry.dailyScore}** pts`;
+					});
+				content += `📊 **Today's Results** 📊\n${todayLines.join('\n')}`;
+			} else {
+				content += `📊 **Today's Results** 📊\nNo games played yet today!`;
+			}
+
+			// All-time scores
+			if (allTimeSorted.length > 0) {
+				const allTimeLines = allTimeSorted.map((e, i) => {
+					const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `**${i + 1}.**`;
+					return `${medal} <@${e[0]}> — **${e[1]}** pts`;
+				});
+				content += `\n\n🏆 **All-Time Leaderboard** 🏆\n${allTimeLines.join('\n')}`;
+			} else {
+				content += `\n\n🏆 **All-Time Leaderboard** 🏆\nNo scores recorded yet!`;
+			}
+
+			res.json({
+				type: 4,
+				data: { content, flags: 0 },
 			});
 			return;
 		}
