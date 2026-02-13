@@ -364,8 +364,9 @@ app.post('/api/report-score', async (req: Request, res: Response) => {
 	} else {
 		content = `🕯️ **7 Circles of Wordle** — **${displayName}** wandered away at ${stageName}.\n${scoreLine}`;
 	}
-	try {
-		const discordRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+	// Helper: send a message to a specific channel
+	async function sendToChannel(targetChannelId: string): Promise<globalThis.Response> {
+		return fetch(`https://discord.com/api/v10/channels/${targetChannelId}/messages`, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
@@ -373,11 +374,58 @@ app.post('/api/report-score', async (req: Request, res: Response) => {
 			},
 			body: JSON.stringify({ content }),
 		});
+	}
+
+	// Helper: open/create a DM channel with the user, returns the DM channel ID
+	async function openDmChannel(targetUserId: string): Promise<string | null> {
+		try {
+			const dmRes = await fetch('https://discord.com/api/v10/users/@me/channels', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: `Bot ${botToken}`,
+				},
+				body: JSON.stringify({ recipient_id: targetUserId }),
+			});
+			if (!dmRes.ok) {
+				console.warn('[report-score] Failed to open DM channel:', dmRes.status, await dmRes.text());
+				return null;
+			}
+			const dmData = await dmRes.json() as { id: string };
+			return dmData.id;
+		} catch (e) {
+			console.warn('[report-score] Error opening DM channel:', e);
+			return null;
+		}
+	}
+
+	try {
+		// First try sending to the provided channelId (works for guild text channels)
+		let discordRes = await sendToChannel(channelId);
+
+		// If it fails (e.g. voice channel from DM call), fall back to creating a DM channel
 		if (!discordRes.ok) {
-			const err = await discordRes.text();
-			console.warn('[report-score] Discord API error:', discordRes.status, err);
-			res.status(502).json({ error: 'Failed to send message to channel' });
-			return;
+			const errStatus = discordRes.status;
+			const errBody = await discordRes.text();
+			console.warn(`[report-score] Channel ${channelId} failed (${errStatus}), trying DM fallback for user ${userId}…`);
+
+			const dmChannelId = await openDmChannel(userId);
+			if (dmChannelId && dmChannelId !== channelId) {
+				discordRes = await sendToChannel(dmChannelId);
+				if (!discordRes.ok) {
+					const dmErr = await discordRes.text();
+					console.warn('[report-score] DM fallback also failed:', discordRes.status, dmErr);
+					res.status(502).json({ error: 'Failed to send message' });
+					return;
+				}
+				console.log(`[report-score] Sent via DM channel ${dmChannelId} (fallback)`);
+				res.json({ ok: true, fallback: 'dm' });
+				return;
+			} else {
+				console.warn('[report-score] Could not open DM channel. Original error:', errStatus, errBody);
+				res.status(502).json({ error: 'Failed to send message to channel' });
+				return;
+			}
 		}
 		res.json({ ok: true });
 	} catch (e) {
