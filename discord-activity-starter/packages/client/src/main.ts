@@ -13,6 +13,55 @@ const MAX_WRONG_HANGMAN = 6;
 const FEEDBACK = { absent: 0, present: 1, correct: 2 } as const;
 const FLIP_DELAY_MS = 120;
 
+const HTP_DISMISSED_KEY = '7circles-htp-dismissed';
+
+/** Show a "How to Play" overlay popup. Calls onDismiss when closed. */
+function showHowToPlay(onDismiss: () => void): void {
+	// Don't show twice
+	if (document.querySelector('.htp-overlay')) return;
+
+	const overlay = document.createElement('div');
+	overlay.className = 'htp-overlay';
+
+	overlay.innerHTML = `
+		<div class="htp-popup">
+			<button class="htp-close" aria-label="Close">✕</button>
+			<div class="htp-header">
+				<h2 class="htp-title">7 Circles of Wordle:</h2>
+				<h4 class="htp-title">A very normal game</h4>
+
+			</div>
+			<div class="htp-body">
+				<p class="htp-line htp-line-1">Welcome welcome welcome,<br>cats and foxes alike ;)</p>
+				<p class="htp-line htp-line-2">Only those without <em>skill issues</em><br>can hope to make it to the end</p>
+				<p class="htp-line htp-line-3">I trust you'll try your best for me <span class="htp-wink">:)</span></p>
+				<p class="htp-line htp-line-4 htp-goodluck">Good luck!</p>
+			</div>
+			<div class="htp-rules">(Resets Daily)</div>
+			<button class="htp-go-btn">Begin!</button>
+		</div>
+	`;
+
+	function dismiss() {
+		try { localStorage.setItem(HTP_DISMISSED_KEY, 'true'); } catch {}
+		overlay.style.animation = 'none';
+		overlay.style.opacity = '0';
+		overlay.style.transition = 'opacity 0.25s ease';
+		setTimeout(() => {
+			overlay.remove();
+			onDismiss();
+		}, 250);
+	}
+
+	overlay.querySelector('.htp-close')?.addEventListener('click', dismiss);
+	overlay.querySelector('.htp-go-btn')?.addEventListener('click', dismiss);
+	overlay.addEventListener('click', (e) => {
+		if (e.target === overlay) dismiss();
+	});
+
+	document.body.appendChild(overlay);
+}
+
 const CIRCLE_NAMES: Record<number, { label: string; name: string }> = {
 	1: { label: 'Circle 1', name: 'Hangman' },
 	2: { label: 'Circle 2', name: 'Wordle' },
@@ -1868,7 +1917,20 @@ function renderGame(app: HTMLDivElement, initial: Progress | null = null): void 
 
 		if (progressState.gameOver) return renderGameOver(app);
 		if (progressState.victory) return renderVictory(app);
-		if (progressState.stage === 1) return renderHangman(app, goToNextStage, doGameOver, progressState.stage1, (d) => mergeSave({ stage1: d }), renderSignal);
+		if (progressState.stage === 1) {
+			renderHangman(app, goToNextStage, doGameOver, progressState.stage1, (d) => mergeSave({ stage1: d }), renderSignal);
+			// Show "How to Play" popup on first visit (stage 1 with no progress)
+			const hasProgress = progressState.stage1 && (
+				progressState.stage1.wrongGuesses.length > 0 ||
+				progressState.stage1.revealed.some((r: string | null) => r !== null)
+			);
+			let dismissed = false;
+			try { dismissed = localStorage.getItem(HTP_DISMISSED_KEY) === 'true'; } catch {}
+			if (!hasProgress && !dismissed) {
+				showHowToPlay(() => { /* popup dismissed, game is already rendered underneath */ });
+			}
+			return;
+		}
 		if (progressState.stage === 2) return renderWordle5(app, 2, goToNextStage, doGameOver, progressState.stage2, progressState.solvedWord1, (d) => mergeSave({ stage2: d }), renderSignal);
 		if (progressState.stage === 3) return renderAnagram(app, goToNextStage, doGameOver, progressState.stage3, (d) => mergeSave({ stage3: d }), renderSignal);
 		if (progressState.stage === 4) return renderWordChain(app, goToNextStage, doGameOver, progressState.stage4, (d) => mergeSave({ stage4: d }), renderSignal);
@@ -1886,7 +1948,35 @@ function showError(message: string): void {
 }
 
 const appEl = document.querySelector<HTMLDivElement>('#app');
-if (appEl) appEl.textContent = 'Loading…';
+if (appEl) {
+	// Show cool loading screen (may already be set from HTML, but ensure it's there)
+	if (!appEl.querySelector('.loading-screen')) {
+		appEl.innerHTML = `
+			<div class="loading-screen">
+				<div class="loading-embers"></div>
+				<div class="loading-flame-ring"><span class="loading-flame-emoji">🔥</span></div>
+				<div class="loading-title">7 Circles of Wordle</div>
+				<div class="loading-subtitle">Descend into the flames…</div>
+				<div class="loading-dots"><span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span></div>
+			</div>
+		`;
+	}
+	// Spawn floating embers into the loading screen
+	const embersContainer = appEl.querySelector('.loading-embers');
+	if (embersContainer) {
+		for (let i = 0; i < 12; i++) {
+			const ember = document.createElement('div');
+			ember.className = 'loading-ember';
+			const left = Math.random() * 100;
+			const size = 3 + Math.random() * 5;
+			const hue = 25 + Math.random() * 35;
+			const delay = Math.random() * 4;
+			const dur = 3 + Math.random() * 3;
+			ember.style.cssText = `left:${left}%;bottom:0;width:${size}px;height:${size}px;background:hsl(${hue},85%,60%);animation-delay:${delay}s;animation-duration:${dur}s;`;
+			embersContainer.appendChild(ember);
+		}
+	}
+}
 
 const AUTH_TIMEOUT_MS = 15000;
 

@@ -163,6 +163,120 @@ app.post('/api/reset', async (req: Request, res: Response) => {
 // Total score per user (all-time). Key: userId
 const totalScoreStore = new Map<string, number>();
 
+// ── Daily channel/user score tracking for daily summary messages ──
+type DailyUserEntry = {
+	username: string;
+	dailyScore: number;
+	stageReached: number;
+	victory: boolean;
+	gameOver: boolean;
+};
+// channelId → Map<userId, DailyUserEntry>
+const dailyChannelScores = new Map<string, Map<string, DailyUserEntry>>();
+let currentTrackingDate = (() => {
+	const d = new Date();
+	return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+})();
+
+function todayUTC(): string {
+	const d = new Date();
+	return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+const STAGE_NAMES: Record<number, string> = {
+	1: 'Circle 1 (Hangman)',
+	2: 'Circle 2 (Wordle)',
+	3: 'Circle 3 (Anagrams)',
+	4: 'Circle 4 (Chains ;))',
+	5: 'Circle 5 (Totally Normal Wordle)',
+	6: 'Circle 6 (Big Wordle)',
+	7: 'Circle 7 (Evil Wordle)',
+};
+
+/** Send daily summary to all channels that had games yesterday, then clear the store. */
+async function sendDailySummaries(): Promise<void> {
+	const botToken = process.env.BOT_TOKEN;
+	if (!botToken) {
+		console.warn('[daily-summary] No BOT_TOKEN, skipping daily summaries.');
+		return;
+	}
+	if (dailyChannelScores.size === 0) {
+		console.log('[daily-summary] No games played yesterday, nothing to send.');
+		return;
+	}
+
+	console.log(`[daily-summary] Sending summaries to ${dailyChannelScores.size} channel(s)…`);
+
+	for (const [channelId, users] of dailyChannelScores) {
+		if (users.size === 0) continue;
+
+		const entries = [...users.entries()];
+		const totalDailyPts = entries.reduce((sum, [, u]) => sum + u.dailyScore, 0);
+		const avgPts = totalDailyPts / entries.length;
+
+		// Build per-user lines
+		const userLines = entries.map(([userId, u]) => {
+			const stageName = STAGE_NAMES[u.stageReached] ?? `Circle ${u.stageReached}`;
+			const allTimeTotal = totalScoreStore.get(userId) ?? 0;
+			let outcome: string;
+			if (u.victory) {
+				outcome = '✅ conquered all seven circles!';
+			} else if (u.gameOver) {
+				outcome = `💀 fell at ${stageName}`;
+			} else {
+				outcome = `🚶 wandered away at ${stageName}`;
+			}
+			return `  **${u.username}** — ${outcome}\n    Daily: **${u.dailyScore}** pts · All-time: **${allTimeTotal}** pts`;
+		});
+
+		const content = [
+			`📊 **7 Circles of Wordle — Daily Recap** 📊`,
+			``,
+			...userLines,
+			``,
+			`**Channel stats:** ${entries.length} player${entries.length === 1 ? '' : 's'} · Avg: **${avgPts.toFixed(1)}** pts · Total: **${totalDailyPts}** pts`,
+			``,
+			`🔥 A new day dawns — new words are ready! Good luck! 🔥`,
+		].join('\n');
+
+		try {
+			const discordRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: `Bot ${botToken}`,
+				},
+				body: JSON.stringify({ content }),
+			});
+			if (!discordRes.ok) {
+				const err = await discordRes.text();
+				console.warn(`[daily-summary] Failed to send to channel ${channelId}:`, discordRes.status, err);
+			}
+		} catch (e) {
+			console.warn(`[daily-summary] Error sending to channel ${channelId}:`, e);
+		}
+	}
+
+	// Clear daily tracking after sending
+	dailyChannelScores.clear();
+	console.log('[daily-summary] Done, daily scores cleared.');
+}
+
+/** Check if the UTC date has rolled over; if so, send summaries and reset tracking. */
+async function checkDayRollover(): Promise<void> {
+	const today = todayUTC();
+	if (today !== currentTrackingDate) {
+		console.log(`[daily-summary] Day rolled over: ${currentTrackingDate} → ${today}`);
+		await sendDailySummaries();
+		currentTrackingDate = today;
+	}
+}
+
+// Check for day rollover every 60 seconds
+setInterval(() => {
+	checkDayRollover().catch((e) => console.warn('[daily-summary] rollover check error:', e));
+}, 60_000);
+
 // Report score to channel/DM after game over or victory (requires BOT_TOKEN)
 app.post('/api/report-score', async (req: Request, res: Response) => {
 	const userId = await userIdFromToken(req);
@@ -184,6 +298,23 @@ app.post('/api/report-score', async (req: Request, res: Response) => {
 	const prevTotal = totalScoreStore.get(userId) ?? 0;
 	const newTotal = prevTotal + daily;
 	totalScoreStore.set(userId, newTotal);
+
+	// Track this play for daily summary
+	await checkDayRollover();
+	if (typeof channelId === 'string' && channelId) {
+		if (!dailyChannelScores.has(channelId)) {
+			dailyChannelScores.set(channelId, new Map());
+		}
+		const channelUsers = dailyChannelScores.get(channelId)!;
+		const displayNameEntry = typeof username === 'string' && username.trim() ? username.trim() : `User ${userId}`;
+		channelUsers.set(userId, {
+			username: displayNameEntry,
+			dailyScore: daily,
+			stageReached: Number(stageReached) || 1,
+			victory: Boolean(victory),
+			gameOver: Boolean(gameOver),
+		});
+	}
 
 	const stageNames: Record<number, string> = {
 		1: 'Circle 1 (Hangman)',
