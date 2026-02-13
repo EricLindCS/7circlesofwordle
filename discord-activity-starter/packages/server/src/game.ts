@@ -281,6 +281,28 @@ function getFeedback7(secret: string, guess: string): number[] {
 	return getFeedbackFor(secret, guess, WORD_LENGTH_7);
 }
 
+/** Feedback for first 5 letters of 6-letter secret (for stage 6 prefill from stage 5). */
+export function getFeedbackForFirst5Letters(secret6: string, guess5: string): number[] {
+	const result: number[] = new Array(5).fill(0);
+	const secretCount: Record<string, number> = {};
+	for (const c of secret6) secretCount[c] = (secretCount[c] ?? 0) + 1;
+	for (let i = 0; i < 5; i++) {
+		if (guess5[i] === secret6[i]) {
+			result[i] = 2;
+			secretCount[secret6[i]]--;
+		}
+	}
+	for (let i = 0; i < 5; i++) {
+		if (result[i] === 2) continue;
+		const c = guess5[i];
+		if (secretCount[c] != null && secretCount[c] > 0) {
+			result[i] = 1;
+			secretCount[c]--;
+		}
+	}
+	return result;
+}
+
 /** Feedback for first 6 letters of 7-letter secret (for stage 7 prefill from stage 6). */
 export function getFeedbackForFirst6Letters(secret7: string, guess6: string): number[] {
 	const result: number[] = new Array(6).fill(0);

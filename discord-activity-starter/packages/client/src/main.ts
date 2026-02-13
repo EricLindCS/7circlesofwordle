@@ -1271,6 +1271,7 @@ function renderWordle6(
 	onWin: (solvedWord?: string) => void,
 	onGameOver: () => void,
 	initialStage6?: Stage2Or3Data | null,
+	previousStageSolvedWord?: string,
 	onSaveStage6?: (data: Stage2Or3Data) => void,
 	signal?: AbortSignal
 ): void {
@@ -1359,14 +1360,15 @@ function renderWordle6(
 			if (rowIndex < completedRows.length) {
 				completedRows[rowIndex].forEach((s, colIndex) => {
 					const cellEl = cells[colIndex];
+					const isBlank = s.letter === '' && s.feedback === null;
 					const inner = cellEl.querySelector('.wordle-cell-inner');
 					const front = cellEl.querySelector('.wordle-cell-front');
 					const back = cellEl.querySelector('.wordle-cell-back');
 					if (inner && front && back) {
-						front.textContent = s.letter;
-						back.textContent = s.letter;
-						back.className = 'wordle-cell-back';
-						if (s.feedback !== null) {
+						front.textContent = isBlank ? '' : s.letter;
+						back.textContent = isBlank ? '' : s.letter;
+						back.className = 'wordle-cell-back' + (isBlank ? ' blank' : '');
+						if (!isBlank && s.feedback !== null) {
 							back.classList.add(
 								s.feedback === FEEDBACK.correct ? 'correct' :
 								s.feedback === FEEDBACK.present ? 'present' : 'absent'
@@ -1375,6 +1377,8 @@ function renderWordle6(
 						inner.classList.remove('flip');
 						if (rowIndex !== animatingRowIndex) inner.classList.add('flip');
 					}
+					if (isBlank) cellEl.classList.add('blank');
+					else cellEl.classList.remove('blank');
 				});
 			} else if (rowIndex === completedRows.length) {
 				for (let i = 0; i < WORD_LENGTH_6; i++) {
@@ -1493,6 +1497,59 @@ function renderWordle6(
 
 	if (completedRows.length > 0) updateKeyboardState();
 	updateGrid();
+
+	// Pre-fill first row: previous stage's 5-letter word + 1 blank cell
+	if (completedRows.length === 0 && previousStageSolvedWord && previousStageSolvedWord.length === WORD_LENGTH) {
+		(async () => {
+			const word = previousStageSolvedWord.toUpperCase();
+			try {
+				const res = await fetch('/api/wordle/stage6-prefill', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ word5: previousStageSolvedWord.toLowerCase() }),
+				});
+				const data = await res.json();
+				if (!res.ok) {
+					const firstRow: CellState[] = [
+						...word.split('').map((l) => ({ letter: l, feedback: null })),
+						{ letter: '', feedback: null },
+					];
+					completedRows = [firstRow];
+					onSaveStage6?.({
+						completedRows: completedRows.map((r) => r.map((c) => ({ letter: c.letter, feedback: c.feedback }))),
+						history: [],
+						currentGuess: '',
+					});
+					updateGrid();
+					return;
+				}
+				const rowState: CellState[] = [
+					...word.split('').map((letter, i) => ({ letter, feedback: data.feedback[i] })),
+					{ letter: '', feedback: null },
+				];
+				completedRows = [rowState];
+				onSaveStage6?.({
+					completedRows: completedRows.map((r) => r.map((c) => ({ letter: c.letter, feedback: c.feedback }))),
+					history: [],
+					currentGuess: '',
+				});
+				updateGrid();
+				updateKeyboardState();
+			} catch (err) {
+				const firstRow: CellState[] = [
+					...word.split('').map((l) => ({ letter: l, feedback: null })),
+					{ letter: '', feedback: null },
+				];
+				completedRows = [firstRow];
+				onSaveStage6?.({
+					completedRows: completedRows.map((r) => r.map((c) => ({ letter: c.letter, feedback: c.feedback }))),
+					history: [],
+					currentGuess: '',
+				});
+				updateGrid();
+			}
+		})();
+	}
 }
 
 // ---- Wordle 7 (Circle 7) ----
@@ -2030,7 +2087,7 @@ function renderGame(app: HTMLDivElement, initial: Progress | null = null): void 
 		if (progressState.stage === 3) return renderAnagram(app, goToNextStage, doGameOver, progressState.stage3, (d) => mergeSave({ stage3: d }), renderSignal);
 		if (progressState.stage === 4) return renderWordChain(app, goToNextStage, doGameOver, progressState.stage4, (d) => mergeSave({ stage4: d }), renderSignal);
 		if (progressState.stage === 5) return renderWordle5(app, 5, goToNextStage, doGameOver, progressState.stage5, progressState.solvedWord4, (d) => mergeSave({ stage5: d }), renderSignal);
-		if (progressState.stage === 6) return renderWordle6(app, goToNextStage, doGameOver, progressState.stage6, (d) => mergeSave({ stage6: d }), renderSignal);
+		if (progressState.stage === 6) return renderWordle6(app, goToNextStage, doGameOver, progressState.stage6, progressState.solvedWord5, (d: Stage2Or3Data) => mergeSave({ stage6: d }), renderSignal);
 		if (progressState.stage === 7) return renderWordle7(app, doVictory, doGameOver, progressState.stage7, progressState.solvedWord6, (d) => mergeSave({ stage7: d }), renderSignal);
 	}
 

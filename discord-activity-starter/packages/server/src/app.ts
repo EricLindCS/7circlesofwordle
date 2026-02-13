@@ -25,6 +25,7 @@ import {
 	validateGuessStage5,
 	validateGuessStage6,
 	validateGuessStage7,
+	getFeedbackForFirst5Letters,
 	getFeedbackForFirst6Letters,
 } from './game';
 import { getProgress, setProgress, resetProgress } from './progress';
@@ -505,6 +506,19 @@ app.post('/api/wordle/guess', (req: Request, res: Response) => {
 		return;
 	}
 	res.status(400).json({ error: 'Missing or invalid stage (2, 4, 5, 6, or 7)' });
+});
+
+// Stage 6 prefill: feedback for first 5 letters (from stage 5's 5-letter word)
+app.post('/api/wordle/stage6-prefill', (req: Request, res: Response) => {
+	const { word5 } = req.body ?? {};
+	const w = String(word5 ?? '').trim().toLowerCase();
+	if (w.length !== 5) {
+		res.status(400).json({ error: 'Word must be 5 letters' });
+		return;
+	}
+	const secret6 = getTodayWordStage6();
+	const feedback = getFeedbackForFirst5Letters(secret6, w);
+	res.json({ feedback });
 });
 
 // Stage 7 prefill: feedback for first 6 letters (from stage 6's 6-letter word)
