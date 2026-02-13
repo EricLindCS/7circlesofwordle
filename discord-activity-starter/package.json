@@ -9,6 +9,8 @@
     "dev": "run-p dev:client dev:server",
     "dev:client": "npm run dev --prefix packages/client",
     "dev:server": "npm run dev --prefix packages/server",
+    "build": "npm run build --prefix packages/client && npm run build --prefix packages/server",
+    "start": "NODE_ENV=production node packages/server/dist/app.js",
     "tunnel": "cloudflared tunnel --url http://localhost:3000"
   },
   "author": "Discord",
